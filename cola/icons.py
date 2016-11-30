@@ -29,6 +29,10 @@ KNOWN_FILE_EXTENSIONS = {
     '.c':       'file-code.svg',
     '.h':       'file-code.svg',
     '.cxx':     'file-code.svg',
+    '.pas':     'file-pascal.svg',
+    '.dpr':     'file-pascal.svg',
+    '.dproj':   'file-delphi.svg',
+    '.groupproj':'file-delphi.svg',    
 }
 
 
