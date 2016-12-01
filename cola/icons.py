@@ -32,7 +32,8 @@ KNOWN_FILE_EXTENSIONS = {
     '.pas':     'file-pascal.svg',
     '.dpr':     'file-pascal.svg',
     '.dproj':   'file-delphi.svg',
-    '.groupproj':'file-delphi.svg',    
+    '.groupproj':'file-delphi.svg',
+    '.exe':     'file-binary.svg',     
 }
 
 
@@ -112,12 +113,20 @@ def from_style(key):
 
 
 def status(filename, deleted, staged, untracked):
+#    if deleted:
+#        icon_name = 'circle-slash-red.svg'
+#    elif staged:
+#        icon_name = 'staged.svg'
+#    elif untracked:
+#       icon_name = 'question-plain.svg'
+#  else:
+#     icon_name = basename_from_filename(filename)
     if deleted:
-        icon_name = 'circle-slash-red.svg'
+        icon_name = basename_from_filename(filename)
     elif staged:
-        icon_name = 'staged.svg'
+        icon_name = basename_from_filename(filename)
     elif untracked:
-        icon_name = 'question-plain.svg'
+        icon_name = basename_from_filename(filename)
     else:
         icon_name = basename_from_filename(filename)
     return icon_name

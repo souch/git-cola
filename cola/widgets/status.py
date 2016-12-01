@@ -3,8 +3,10 @@ import itertools
 
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
+from qtpy.QtGui import QColor, QPalette
 from qtpy import QtCore
 from qtpy import QtWidgets
+
 
 from ..i18n import N_
 from ..models import main
@@ -112,6 +114,11 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
         self.setIndentation(0)
         self.setDragEnabled(True)
         self.setAutoScroll(False)
+
+        self.colorModified = QColor.fromRgb(0x54, 0x7e, 0xff, 0xa0)
+        self.colorStaged = QColor.fromRgb(0x49, 0xd7, 0x5d, 0xff)
+        self.colorDeleted = QColor.fromRgb(0xff, 0x55, 0x42, 0xff)
+        self.colorUntracked = QColor.fromRgb(0xc7, 0xc7, 0xc7, 0xff)
 
         ok = icons.ok()
         compare = icons.compare()
@@ -454,6 +461,19 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
                                                staged=staged,
                                                deleted=deleted,
                                                untracked=untracked)
+
+            # add background color
+            color = self.colorModified
+            if staged:
+                color = self.colorStaged
+            if deleted:
+                color = self.colorDeleted
+            if untracked:
+                color = self.colorUntracked
+            p = self.palette()
+            p.setColor(QPalette.Base, color)
+            treeitem.setBackground(0, p.base())
+
             parent.addChild(treeitem)
         self.expand_items(idx, items)
         self.blockSignals(False)
