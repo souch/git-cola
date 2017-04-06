@@ -83,8 +83,7 @@ class _BaseThread(QtCore.QThread):
         QtCore.QThread.__init__(self)
         self._monitor = monitor
         self._running = True
-        self._use_check_ignore = version.check('check-ignore',
-                                               version.git_version())
+        self._use_check_ignore = version.check_git('check-ignore')
         self._force_notify = False
         self._file_paths = set()
 
@@ -299,10 +298,10 @@ if AVAILABLE == 'inotify':
             elif mask & inotify.IN_ISDIR:
                 pass
             elif wd in self._worktree_wd_to_path_map:
-                if self._use_check_ignore:
-                    self._file_paths.add(
-                            os.path.join(self._worktree_wd_to_path_map[wd],
-                                         core.decode(name)))
+                if self._use_check_ignore and name:
+                    path = os.path.join(self._worktree_wd_to_path_map[wd],
+                                        core.decode(name))
+                    self._file_paths.add(path)
                 else:
                     self._force_notify = True
             elif wd == self._git_dir_wd:

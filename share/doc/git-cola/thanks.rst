@@ -38,8 +38,10 @@ Thanks
 * deniz1a
 * Dmitry Kann
 * Drugoy
+* Efimov Vasily
 * Eric Drechsel
 * Fabio Coatti
+* Filip Danilović
 * Garoe Dorta
 * Geoffrey van Wyk
 * geotavros
@@ -49,13 +51,16 @@ Thanks
 * Guo Yunhe
 * Harro Verton
 * Igor Galarraga
+* Igor Kopach
 * Ilya Tumaykin
 * Ingo Weinhold
 * Ismael Juma
 * Iulian Udrea
 * Ivar Smolin
+* Jan @hanksoff
 * Jakub Wilk
 * James Geiger
+* Javier Rodriguez Cuevas
 * Jeff Dagenais
 * Jérôme Carretero
 * JiCiT
@@ -71,6 +76,7 @@ Thanks
 * Kirit Sælensminde
 * László Böszörményi
 * Leho Kraav
+* Lev Zlotin
 * Libor Jelinek
 * Liviu Cristian Mirea-Ghiban
 * Łukasz Wojniłowicz
@@ -89,14 +95,18 @@ Thanks
 * Micha Rosenbaum
 * Michael Geddes
 * Michael Homer
+* Mickael Albertus
 * MikHulk
 * Minarto Margoliono
+* Myz
 * Naraesk
+* Nick Todd
 * Nicolas Dietrich
 * OmegaPhil (Omega Weapon)
 * Owen Healy
 * Pamela Strucker
 * Paolo G. Giarrusso
+* Parashurama Rhagdamaziel
 * Patrick Browne
 * Paul Hildebrandt
 * Paul Weingardt
@@ -118,9 +128,12 @@ Thanks
 * Stefan Naewe
 * Steffen Prohaska
 * Sven Claussner
+* Szymon Judasz
 * Taylor Braun-Jones
 * Thiemo van Engelen
+* Thomas Kiley
 * Thomas Kluyver
+* Tim Schumacher
 * Trevor Alexander
 * Ugo Riboni
 * Uri Okrent
@@ -134,6 +147,7 @@ Thanks
 * Vitor Lobo
 * v.paritskiy
 * Wolfgang Ocker
+* Xieofxie
 * Yi EungJun
 * Zeioth
 * Zhang Han

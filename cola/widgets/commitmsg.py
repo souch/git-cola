@@ -135,7 +135,8 @@ class CommitMessageEditor(QtWidgets.QWidget):
         self.check_spelling_action = self.actions_menu.addAction(
                 N_('Check Spelling'))
         self.check_spelling_action.setCheckable(True)
-        self.check_spelling_action.setChecked(False)
+        self.check_spelling_action.setChecked(prefs.spellcheck())
+        self.toggle_check_spelling(prefs.spellcheck())
 
         # Line wrapping
         self.autowrap_action = self.actions_menu.addAction(
@@ -199,8 +200,6 @@ class CommitMessageEditor(QtWidgets.QWidget):
         self.description.leave.connect(self.focus_summary)
         self.updated.connect(self.refresh)
 
-        self.summary.hint.enable(True)
-        self.description.hint.enable(True)
         self.commit_group.setEnabled(False)
 
         self.set_tabwidth(prefs.tabwidth())
@@ -212,12 +211,22 @@ class CommitMessageEditor(QtWidgets.QWidget):
         commit_msg_path = commit_message_path()
         if commit_msg_path:
             commit_msg = core.read(commit_msg_path)
-        self.set_commit_message(commit_msg)
+        model.set_commitmsg(commit_msg)
 
         # Allow tab to jump from the summary to the description
         self.setTabOrder(self.summary, self.description)
         self.setFont(qtutils.diff_font())
         self.setFocusProxy(self.summary)
+
+        gitcfg.current().add_observer(gitcfg.current().message_user_config_changed, self.on_user_setting_changed)
+
+    def on_user_setting_changed(self, key, value):
+        if key != prefs.SPELL_CHECK:
+            return
+        if self.check_spelling_action.isChecked() == value:
+            return
+        self.check_spelling_action.setChecked(value)
+        self.toggle_check_spelling(value)
 
     def refresh(self):
         enabled = self.model.stageable() or self.model.unstageable()
@@ -360,16 +369,10 @@ class CommitMessageEditor(QtWidgets.QWidget):
         focus_description = not description
 
         # Update summary
-        if not summary and not self.summary.hasFocus():
-            self.summary.hint.enable(True)
-        else:
-            self.summary.set_value(summary, block=True)
+        self.summary.set_value(summary, block=True)
 
         # Update description
-        if not description and not self.description.hasFocus():
-            self.description.hint.enable(True)
-        else:
-            self.description.set_value(description, block=True)
+        self.description.set_value(description, block=True)
 
         # Update text color
         self.refresh_palettes()
@@ -514,6 +517,8 @@ class CommitMessageEditor(QtWidgets.QWidget):
     def toggle_check_spelling(self, enabled):
         spellcheck = self.description.spellcheck
 
+        if gitcfg.current().get_user(prefs.SPELL_CHECK) != enabled:
+            gitcfg.current().set_user(prefs.SPELL_CHECK, enabled)
         if enabled and not self.spellcheck_initialized:
             # Add our name to the dictionary
             self.spellcheck_initialized = True
@@ -545,7 +550,7 @@ class CommitSummaryLineEdit(HintedLineEdit):
 
     def __init__(self, parent=None):
         hint = N_('Commit summary')
-        HintedLineEdit.__init__(self, hint, parent)
+        HintedLineEdit.__init__(self, hint, parent=parent)
         self.extra_actions = []
 
         comment_char = prefs.comment_char()

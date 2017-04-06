@@ -1,6 +1,7 @@
 from __future__ import division, absolute_import, unicode_literals
 import time
 
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
@@ -8,7 +9,7 @@ from qtpy.QtCore import Signal
 from .. import qtutils
 from ..i18n import N_
 from . import defs
-from .text import MonoTextView
+from .text import VimTextEdit
 
 
 class LogWidget(QtWidgets.QWidget):
@@ -18,7 +19,8 @@ class LogWidget(QtWidgets.QWidget):
     def __init__(self, parent=None, output=None):
         QtWidgets.QWidget.__init__(self, parent)
 
-        self.output_text = MonoTextView(self)
+        self.output_text = VimTextEdit(parent=self)
+        self.highlighter = LogSyntaxHighlighter(self.output_text.document())
         if output:
             self.set_output(output)
         self.main_layout = qtutils.vbox(defs.no_margin, defs.spacing,
@@ -30,7 +32,7 @@ class LogWidget(QtWidgets.QWidget):
         self.output_text.clear()
 
     def set_output(self, output):
-        self.output_text.setText(output)
+        self.output_text.set_value(output)
 
     def log_status(self, status, out, err=None):
         msg = []
@@ -48,10 +50,9 @@ class LogWidget(QtWidgets.QWidget):
         cursor = self.output_text.textCursor()
         cursor.movePosition(cursor.End)
         text = self.output_text
-        cursor.insertText(time.asctime() + '\n')
+        prefix = time.asctime() + ':  '
         for line in msg.splitlines():
-            cursor.insertText(line + '\n')
-        cursor.insertText('\n')
+            cursor.insertText(prefix + line + '\n')
         cursor.movePosition(cursor.End)
         text.setTextCursor(cursor)
 
@@ -59,3 +60,17 @@ class LogWidget(QtWidgets.QWidget):
         """A version of the log() method that can be called from other
         threads."""
         self.channel.emit(msg)
+
+
+class LogSyntaxHighlighter(QtGui.QSyntaxHighlighter):
+    """Implements the log syntax highlighting"""
+
+    def __init__(self, doc):
+        QtGui.QSyntaxHighlighter.__init__(self, doc)
+        palette = QtGui.QPalette()
+        QPalette = QtGui.QPalette
+        self.disabled_color = palette.color(QPalette.Disabled, QPalette.Text)
+
+    def highlightBlock(self, text):
+        log_end = text.find(':  ') + 1
+        self.setFormat(0, log_end, self.disabled_color)

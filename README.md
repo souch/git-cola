@@ -2,7 +2,7 @@
 
     git-cola is a powerful Git GUI with a slick and intuitive user interface.
 
-    Copyright (C) 2007-2016, David Aguilar and contributors
+    Copyright (C) 2007-2017, David Aguilar and contributors
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -181,18 +181,14 @@ Use the [one-click install link](http://software.opensuse.org/package/git-cola).
 
 ## MAC OS X
 
-Before setting up homebrew, use
-[pip](https://pip.readthedocs.io/en/latest/installing.html) to install
-[sphinx](http://sphinx-doc.org/latest/install.html).
-
-Sphinx is used to build the documentation.
-
-    sudo pip install --requirement requirements.txt
-
 [Homebrew](http://brew.sh/) is the easiest way to install
 git-cola's *Qt4* and *PyQt4* dependencies.  We will use Homebrew to install
 the git-cola recipe, but build our own .app bundle from source.
 
+[Sphinx](http://sphinx-doc.org/latest/install.html) is used to build the
+documentation.
+
+    brew install sphinx-doc
     brew install git-cola
 
 Once brew has installed git-cola you can:
@@ -203,11 +199,43 @@ Once brew has installed git-cola you can:
 
 2. Build the git-cola.app application bundle
 
-    `make git-cola.app`
+    ```
+    make \
+        PYTHON=$(brew --prefix python3)/bin/python3 \
+        PYTHON_CONFIG=$(brew --prefix python3)/bin/python3-config \
+        SPHINXBUILD=$(brew --prefix sphinx-doc)/bin/sphinx-build \
+        git-cola.app
+   ```
 
 3. Copy it to _/Applications_
 
     `rm -fr /Applications/git-cola.app && cp -r git-cola.app /Applications`
+
+Newer versions of Homebrew install their own `python3` installation and
+provide the `PyQt5` modules for `python3` only.  You have to use
+`python3 ./bin/git-cola` when running from the source tree.
+
+### UPGRADING USING HOMEBREW
+
+If you upgrade using `brew` then it is recommended that you re-install
+*git-cola*'s dependencies when upgrading.  Re-installing ensures that the
+Python modules provided by Homebrew will be properly setup.
+
+This is required when upgrading to a modern (post-10.11 El Capitan) Mac OS X.
+Homebrew now bundles its own Python3 installation instead of using the
+system-provided default Python.
+
+
+    # update homebrew
+    brew update
+
+    # uninstall git-cola and its dependencies
+    brew uninstall git-cola
+    brew uninstall pyqt5
+    brew uninstall sip
+
+    # re-install git-cola and its dependencies
+    brew install git-cola
 
 ## WINDOWS INSTALLATION
 
@@ -309,7 +337,7 @@ The following commands should be run during development:
     $ make test
 
     # Check for pylint warnings.  All new code must pass 100%.
-    $ make pylint
+    $ make pylint3k
 
 The test suite can be found in the [test](test) directory.
 

@@ -315,6 +315,8 @@ def translators_text():
              email=mailto('Vdragon.Taiwan@gmail.com', contact, palette)),
         dict(name='Vitor Lobo',
              title=N_('Brazilian translation')),
+        dict(name='Mickael Albertus',
+             title=N_('French translation')),
         dict(name='Minarto Margoliono',
              title=N_('Indonesian translation')),
         dict(name='Zhang Han',
@@ -336,6 +338,8 @@ def translators_text():
              title=N_('Indonesian translation')),
         dict(name='Zeioth',
              title=N_('Spanish translation')),
+        dict(name='Igor Kopach',
+             title=N_('Ukranian translation')),
     )
 
     bug_url = 'https://github.com/git-cola/git-cola/issues'
@@ -372,7 +376,7 @@ def show_shortcuts():
     hotkeys_html = resources.doc(N_('hotkeys.html'))
     try:
         from qtpy import QtWebEngineWidgets
-    except ImportError:
+    except (ImportError, qtpy.PythonQtError):
         # redhat disabled QtWebKit in their qt build but don't punish the users
         webbrowser.open_new_tab('file://' + hotkeys_html)
         return

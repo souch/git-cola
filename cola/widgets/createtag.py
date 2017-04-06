@@ -47,7 +47,6 @@ class CreateTag(standard.Dialog):
 
         self.opts = opts
 
-        self.setAttribute(Qt.WA_MacMetalStyle)
         self.setWindowTitle(N_('Create Tag'))
         if parent is not None:
             self.setWindowModality(QtCore.Qt.WindowModal)
@@ -56,7 +55,7 @@ class CreateTag(standard.Dialog):
         self.tag_name_label = QtWidgets.QLabel(self)
         self.tag_name_label.setText(N_('Name'))
 
-        self.tag_name = text.HintedLineEdit(N_('vX.Y.Z'), self)
+        self.tag_name = text.HintedLineEdit(N_('vX.Y.Z'), parent=self)
         self.tag_name.set_value(opts.name)
         self.tag_name.setToolTip(N_('Specifies the tag name'))
 
@@ -71,9 +70,8 @@ class CreateTag(standard.Dialog):
         self.tag_msg_label = QtWidgets.QLabel(self)
         self.tag_msg_label.setText(N_('Message'))
 
-        self.tag_msg = text.HintedTextEdit(N_('Tag message...'), self)
+        self.tag_msg = text.HintedPlainTextEdit(N_('Tag message...'), self)
         self.tag_msg.setToolTip(N_('Specifies the tag message'))
-        self.tag_msg.hint.enable(True)
         # Revision
         self.rev_label = QtWidgets.QLabel(self)
         self.rev_label.setText(N_('Revision'))
@@ -83,7 +81,8 @@ class CreateTag(standard.Dialog):
         self.revision.setToolTip(N_('Specifies the SHA-1 to tag'))
         # Buttons
         self.create_button = qtutils.create_button(text=N_('Create Tag'),
-                                                   icon=icons.tag())
+                                                   icon=icons.tag(),
+                                                   default=True)
         self.close_button = qtutils.close_button()
 
         # Form layout for inputs
@@ -93,9 +92,10 @@ class CreateTag(standard.Dialog):
                                          (self.rev_label, self.revision),
                                          (self.sign_label, self.sign_tag))
 
-        self.button_layout = qtutils.hbox(defs.no_margin, defs.spacing,
-                                          qtutils.STRETCH, self.create_button,
-                                          self.close_button)
+        self.button_layout = qtutils.hbox(defs.no_margin, defs.button_spacing,
+                                          self.close_button,
+                                          qtutils.STRETCH,
+                                          self.create_button)
 
         self.main_layt = qtutils.vbox(defs.margin, defs.spacing,
                                       self.input_layout, self.button_layout)

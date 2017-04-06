@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, unicode_literals
 import unittest
 
 from cola import core
-from cola.diffparse import _parse_range_str, DiffParser
+from cola import diffparse
 
 from test import helper
 
@@ -12,7 +12,8 @@ class ParseDiffTestCase(unittest.TestCase):
 
     def test_diff(self):
         fixture_path = helper.fixture('diff.txt')
-        parser = DiffParser('cola/diffparse.py', core.read(fixture_path))
+        parser = diffparse.DiffParser('cola/diffparse.py',
+                                      core.read(fixture_path))
         hunks = parser.hunks
 
         self.assertEqual(len(hunks), 3)
@@ -65,7 +66,7 @@ class ParseDiffTestCase(unittest.TestCase):
 
     def test_diff_at_start(self):
         fixture_path = helper.fixture('diff-start.txt')
-        parser = DiffParser('foo bar/a', core.read(fixture_path))
+        parser = diffparse.DiffParser('foo bar/a', core.read(fixture_path))
         hunks = parser.hunks
 
         self.assertEqual(hunks[0].lines[0], '@@ -1 +1,4 @@')
@@ -92,7 +93,7 @@ class ParseDiffTestCase(unittest.TestCase):
 
     def test_diff_at_end(self):
         fixture_path = helper.fixture('diff-end.txt')
-        parser = DiffParser('rijndael.js', core.read(fixture_path))
+        parser = diffparse.DiffParser('rijndael.js', core.read(fixture_path))
         hunks = parser.hunks
 
         self.assertEqual(hunks[0].lines[0], '@@ -1,39 +1 @@')
@@ -106,7 +107,7 @@ class ParseDiffTestCase(unittest.TestCase):
 
     def test_diff_that_empties_file(self):
         fixture_path = helper.fixture('diff-empty.txt')
-        parser = DiffParser('filename', core.read(fixture_path))
+        parser = diffparse.DiffParser('filename', core.read(fixture_path))
         hunks = parser.hunks
 
         self.assertEqual(hunks[0].lines[0], '@@ -1,2 +0,0 @@')
@@ -129,19 +130,216 @@ class ParseDiffTestCase(unittest.TestCase):
                          '-second\n')
 
 
+class DiffLinesTestCase(unittest.TestCase):
+
+    def setUp(self):
+        self.parser = diffparse.DiffLines()
+        fixture_path = helper.fixture('diff.txt')
+        self.text = core.read(fixture_path)
+
+    def test_basic_diff_line_count(self):
+        """Verify the basic line counts"""
+        lines = self.parser.parse(self.text)
+        expect = len(self.text.splitlines())
+        actual = len(lines)
+        self.assertEqual(expect, actual)
+
+    def test_diff_line_count_ranges(self):
+        parser = self.parser
+        lines = parser.parse(self.text)
+
+        # Diff header
+        line = 0
+        count = 1
+        self.assertEqual(lines[line][0], parser.DASH)
+        self.assertEqual(lines[line][1], parser.DASH)
+        line += count
+
+        # 3 lines of context
+        count = 3
+        current_old = 6
+        current_new = 6
+        for i in range(count):
+            self.assertEqual(lines[line+i][0], current_old+i)
+            self.assertEqual(lines[line+i][1], current_new+i)
+        line += count
+        current_old += count
+        current_new += count
+
+        # 10 lines of new text
+        count = 10
+        for i in range(count):
+            self.assertEqual(lines[line+i][0], parser.EMPTY)
+            self.assertEqual(lines[line+i][1], current_new+i)
+
+        line += count
+        current_new += count
+
+        # 3 more lines of context
+        count = 3
+        for i in range(count):
+            self.assertEqual(lines[line+i][0], current_old+i)
+            self.assertEqual(lines[line+i][1], current_new+i)
+        line += count
+        current_new += count
+        current_old += count
+
+        # 1 line of removal
+        count = 1
+        for i in range(count):
+            self.assertEqual(lines[line+i][0], current_old+i)
+            self.assertEqual(lines[line+i][1], parser.EMPTY)
+        line += count
+        current_old += count
+
+        # 2 lines of addition
+        count = 2
+        for i in range(count):
+            self.assertEqual(lines[line+i][0], parser.EMPTY)
+            self.assertEqual(lines[line+i][1], current_new+i)
+        line += count
+        current_new += count
+
+        # 3 more lines of context
+        count = 3
+        for i in range(count):
+            self.assertEqual(lines[line+i][0], current_old+i)
+            self.assertEqual(lines[line+i][1], current_new+i)
+        line += count
+        current_new += count
+        current_old += count
+
+        # 1 line of header
+        count = 1
+        for i in range(count):
+            self.assertEqual(lines[line+i][0], parser.DASH)
+            self.assertEqual(lines[line+i][1], parser.DASH)
+        line += count
+
+        # 3 more lines of context
+        current_old = 29
+        current_new = 40
+        count = 3
+        for i in range(count):
+            self.assertEqual(lines[line+i][0], current_old+i)
+            self.assertEqual(lines[line+i][1], current_new+i)
+        line += count
+        current_new += count
+        current_old += count
+
+        expect_max_old = 54
+        self.assertEqual(expect_max_old, parser.old.max_value)
+
+        expect_max_new = 62
+        self.assertEqual(expect_max_new, parser.new.max_value)
+
+        self.assertEqual(parser.digits(), 2)
+
+    def test_diff_line_for_merge(self):
+        """Verify the basic line counts"""
+        text = """@@@ -1,23 -1,33 +1,75 @@@
+++<<<<<<< upstream
+ +
+ +Ok
+"""
+        parser = self.parser
+        lines = parser.parse(text)
+        self.assertEqual(len(lines), 4)
+        self.assertEqual(len(lines[0]), 3)
+        self.assertEqual(len(lines[1]), 3)
+        self.assertEqual(len(lines[2]), 3)
+        self.assertEqual(len(lines[3]), 3)
+
+        self.assertEqual(lines[0][0], parser.DASH)
+        self.assertEqual(lines[0][1], parser.DASH)
+        self.assertEqual(lines[0][2], parser.DASH)
+
+        self.assertEqual(lines[1][0], parser.EMPTY)
+        self.assertEqual(lines[1][1], parser.EMPTY)
+        self.assertEqual(lines[1][2], 1)
+
+        self.assertEqual(lines[2][0], 1)
+        self.assertEqual(lines[2][1], parser.EMPTY)
+        self.assertEqual(lines[2][2], 2)
+
+        self.assertEqual(lines[3][0], 2)
+        self.assertEqual(lines[3][1], parser.EMPTY)
+        self.assertEqual(lines[3][2], 3)
+
+class FormatDiffLinesTestCase(unittest.TestCase):
+
+    def test_format_basic(self):
+        fmt = diffparse.FormatDigits()
+        fmt.set_digits(2)
+
+        expect = '01 99'
+        actual = fmt.value(1, 99)
+        self.assertEqual(expect, actual)
+
+    def test_format_reuse(self):
+        fmt = diffparse.FormatDigits()
+
+        fmt.set_digits(3)
+        expect = '001 099'
+        actual = fmt.value(1, 99)
+        self.assertEqual(expect, actual)
+
+        fmt.set_digits(4)
+        expect = '0001 0099'
+        actual = fmt.value(1, 99)
+        self.assertEqual(expect, actual)
+
+    def test_format_special_values(self):
+        fmt = diffparse.FormatDigits(dash='-')
+        fmt.set_digits(3)
+
+        expect = '    099'
+        actual = fmt.value(fmt.EMPTY, 99)
+        self.assertEqual(expect, actual)
+
+        expect = '001    '
+        actual = fmt.value(1, fmt.EMPTY)
+        self.assertEqual(expect, actual)
+
+        expect = '       '
+        actual = fmt.value(fmt.EMPTY, fmt.EMPTY)
+        self.assertEqual(expect, actual)
+
+        expect = '--- 001'
+        actual = fmt.value(fmt.DASH, 1)
+        self.assertEqual(expect, actual)
+
+        expect = '099 ---'
+        actual = fmt.value(99, fmt.DASH)
+        self.assertEqual(expect, actual)
+
+        expect = '--- ---'
+        actual = fmt.value(fmt.DASH, fmt.DASH)
+        self.assertEqual(expect, actual)
+
+        expect = '    ---'
+        actual = fmt.value(fmt.EMPTY, fmt.DASH)
+        self.assertEqual(expect, actual)
+
+        expect = '---    '
+        actual = fmt.value(fmt.DASH, fmt.EMPTY)
+        self.assertEqual(expect, actual)
+
+
 class ParseRangeStrTestCase(unittest.TestCase):
+
     def test_parse_range_str(self):
-        start, count = _parse_range_str('1,2')
+        start, count = diffparse._parse_range_str('1,2')
         self.assertEqual(start, 1)
         self.assertEqual(count, 2)
 
     def test_parse_range_str_single_line(self):
-        start, count = _parse_range_str('2')
+        start, count = diffparse._parse_range_str('2')
         self.assertEqual(start, 2)
         self.assertEqual(count, 1)
 
     def test_parse_range_str_empty(self):
-        start, count = _parse_range_str('0,0')
+        start, count = diffparse._parse_range_str('0,0')
         self.assertEqual(start, 0)
         self.assertEqual(count, 0)
 

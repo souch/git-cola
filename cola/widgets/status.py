@@ -12,6 +12,7 @@ from ..i18n import N_
 from ..models import main
 from ..models import prefs
 from ..models import selection
+from ..widgets import gitignore
 from .. import cmds
 from .. import core
 from .. import hotkeys
@@ -638,9 +639,8 @@ class StatusTreeWidget(QtWidgets.QTreeWidget):
             menu.addAction(self.delete_untracked_files_action)
             menu.addSeparator()
             menu.addAction(icons.edit(),
-                           N_('Add to .gitignore'),
-                           cmds.run(cmds.Ignore,
-                                    [('/' + x) for x in self.untracked()]))
+                            N_('Add to .gitignore'),
+                            gitignore.gitignore_view)
         menu.addSeparator()
         menu.addAction(self.copy_path_action)
         menu.addAction(self.copy_relpath_action)
@@ -928,7 +928,6 @@ class StatusFilterWidget(QtWidgets.QWidget):
         hint = N_('Filter paths...')
         self.text = completion.GitStatusFilterLineEdit(hint=hint, parent=self)
         self.text.setToolTip(hint)
-        self.text.hint.enable(True)
         self.setFocusProxy(self.text)
         self._filter = None
 

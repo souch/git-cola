@@ -16,6 +16,8 @@ NOSETESTS = nosetests
 PIP = pip
 PYLINT = pylint
 PYTHON = python
+PYTHON_CONFIG = python-config
+PYTHON_DARWIN_APP = $(shell $(PYTHON_CONFIG) --prefix)/Resources/Python.app/Contents/MacOS/Python
 RM = rm -f
 RM_R = rm -fr
 RMDIR = rmdir
@@ -23,7 +25,10 @@ TAR = tar
 
 # Flags
 FLAKE8_FLAGS = --max-line-length=80 --statistics --doctests --format=pylint
-PYLINT_FLAGS = --py3k --output-format=colorized --rcfile=.pylintrc
+PYLINT_FLAGS = --rcfile=.pylintrc
+ifdef color
+    PYLINT_FLAGS += --output-format=colorized
+endif
 
 # These values can be overridden on the command-line or via config.mak
 prefix = $(HOME)
@@ -31,7 +36,6 @@ bindir = $(prefix)/bin
 datadir = $(prefix)/share/git-cola
 coladir = $(datadir)/lib
 hicolordir = $(prefix)/share/icons/hicolor/scalable/apps
-darwin_python = /System/Library/Frameworks/Python.framework/Resources/Python.app/Contents/MacOS/Python
 # DESTDIR =
 
 cola_base := git-cola
@@ -173,12 +177,21 @@ tags:
 	$(FIND) $(ALL_PYTHON_DIRS) -name '*.py' -print0 | xargs -0 $(CTAGS) -f tags
 .PHONY: tags
 
+# Update i18n files
+i18n: mo pot
+.PHONY: i18n
+
+i18n-update: i18n
+	git add po
+	git commit -sm'i18n: update translation template'
+.PHONY: i18n-update
+
 pot:
-	$(SETUP) build_pot -N -d po
+	$(SETUP) build_pot --no-lang --build-dir=po
 .PHONY: pot
 
 mo:
-	$(SETUP) build_mo -f
+	$(SETUP) build_mo --force
 .PHONY: mo
 
 git-cola.app:
@@ -188,7 +201,7 @@ git-cola.app:
 	$(CP) contrib/darwin/git-cola $(cola_app)/Contents/MacOS
 	$(CP) contrib/darwin/git-cola.icns $(cola_app)/Contents/Resources
 	$(MAKE) prefix=$(cola_app)/Contents/Resources install install-doc
-	$(LN_S) $(darwin_python) $(cola_app)/Contents/Resources/git-cola
+	$(LN_S) $(PYTHON_DARWIN_APP) $(cola_app)/Contents/Resources/git-cola
 .PHONY: git-cola.app
 
 app-tarball: git-cola.app
@@ -203,11 +216,22 @@ flake8:
 	$(FLAKE8) $(FLAKE8_FLAGS) $(PYTHON_SOURCES) $(PYTHON_DIRS)
 .PHONY: flake8
 
+pylint3k:
+	$(PYLINT) $(PYLINT_FLAGS) --py3k $(flags) $(PYTHON_SOURCES) $(ALL_PYTHON_DIRS)
+.PHONY: pylint3k
+
 pylint:
-	$(PYLINT) $(PYLINT_FLAGS) $(PYTHON_SOURCES) $(ALL_PYTHON_DIRS)
+	$(PYLINT) $(PYLINT_FLAGS) $(flags) $(PYTHON_SOURCES) $(ALL_PYTHON_DIRS)
 .PHONY: pylint
 
+pylint-check:
+	$(PYLINT) $(PYLINT_FLAGS) $(flags) $(file)
+.PHONY: pylint-check
+
 requirements:
-	$(PIP) install --requirement requirements.txt
-	$(PIP) install --requirement extras/requirements-dev.txt
+	$(PIP) install --requirement requirements/requirements.txt
 .PHONY: requirements
+
+requirements-dev:
+	$(PIP) install --requirement requirements/requirements-dev.txt
+.PHONY: requirements-dev

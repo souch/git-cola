@@ -1,12 +1,11 @@
 from __future__ import division, absolute_import, unicode_literals
 
+from qtpy.QtCore import Qt
+from qtpy.QtCore import Signal
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
-from qtpy.QtCore import Qt
-from qtpy.QtCore import Signal
 
-from ..models.browse import GitRepoEntryStore
 from ..models.browse import GitRepoModel
 from ..models.browse import GitRepoNameItem
 from ..models.selection import State
@@ -15,11 +14,11 @@ from ..cmds import BaseCommand
 from ..git import git
 from ..i18n import N_
 from ..interaction import Interaction
+from ..models import browse
 from ..models import main
 from ..compat import ustr
 from .. import cmds
 from .. import core
-from .. import difftool
 from .. import gitcmds
 from .. import hotkeys
 from .. import icons
@@ -31,25 +30,35 @@ from . import defs
 from . import standard
 
 
-def worktree_browser_widget(parent, update=True, settings=None):
-    """Return a widget for immediate use."""
+def worktree_browser(parent=None, update=True, settings=None, show=False):
+    """Create a new worktree browser"""
     view = Browser(parent, update=update, settings=settings)
-    view.tree.setModel(GitRepoModel(view.tree))
-    view.ctl = BrowserController(view.tree)
+    model = GitRepoModel(view.tree)
+    view.set_model(model)
     if update:
-        view.tree.refresh()
+        view.refresh()
+    if show:
+        view.show()
     return view
 
 
-def worktree_browser(update=True, settings=None):
-    """Launch a new worktree browser session."""
-    view = worktree_browser_widget(None, update=update, settings=settings)
-    view.show()
-    return view
+def save_path(path, model):
+    """Choose an output filename based on the selected path"""
+    filename = qtutils.save_as(model.filename)
+    if filename:
+        model.filename = filename
+        cmds.do(SaveBlob, model)
+        result = True
+    else:
+        result = False
+    return result
 
 
 class Browser(standard.Widget):
     updated = Signal()
+
+    # Read-only mode property
+    mode = property(lambda self: self.model.mode)
 
     def __init__(self, parent, update=True, settings=None):
         standard.Widget.__init__(self, parent)
@@ -69,8 +78,13 @@ class Browser(standard.Widget):
 
         self.init_state(settings, self.resize, 720, 420)
 
-    # Read-only mode property
-    mode = property(lambda self: self.model.mode)
+    def set_model(self, model):
+        """Set the model"""
+        self.tree.set_model(model)
+
+    def refresh(self):
+        """Refresh the model triggering view updates"""
+        self.tree.refresh()
 
     def model_updated(self):
         """Update the title with the current branch and directory name."""
@@ -95,8 +109,6 @@ class RepoTreeView(standard.TreeView):
     """Provides a filesystem-like view of a git repository."""
 
     about_to_update = Signal()
-    difftool_predecessor = Signal(object)
-    history = Signal(object)
     updated = Signal()
 
     def __init__(self, parent):
@@ -107,10 +119,12 @@ class RepoTreeView(standard.TreeView):
         self.saved_open_folders = set()
         self.restoring_selection = False
 
+        self.info_event_type = browse.GitRepoInfoEvent.TYPE
+
         self.setDragEnabled(True)
         self.setRootIsDecorated(False)
         self.setSortingEnabled(False)
-        self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.setSelectionMode(self.ExtendedSelection)
 
         # Observe model updates
         model = main.model()
@@ -122,7 +136,6 @@ class RepoTreeView(standard.TreeView):
                                      type=Qt.QueuedConnection)
         self.updated.connect(self.update_actions, type=Qt.QueuedConnection)
 
-        self.expanded.connect(lambda idx: self.size_columns())
         self.expanded.connect(self.index_expanded)
 
         self.collapsed.connect(lambda idx: self.size_columns())
@@ -188,11 +201,29 @@ class RepoTreeView(standard.TreeView):
         self.size_columns()
 
     def index_expanded(self, index):
-        item = self.model().itemFromIndex(index)
+        """Update information about a directory as it is expanded."""
+        # Remember open folders so that we can restore them when refreshing
+        item = self.item_from_index(index)
         self.saved_open_folders.add(item.path)
+        self.size_columns()
+
+        # update information about a directory as it is expanded
+        if item.cached:
+            return
+        path = item.path
+
+        model = self.model()
+        model.populate(item)
+        model.update_entry(path)
+
+        for row in range(item.rowCount()):
+            path = item.child(row, 0).path
+            model.update_entry(path)
+
+        item.cached = True
 
     def index_collapsed(self, index):
-        item = self.model().itemFromIndex(index)
+        item = self.item_from_index(index)
         self.saved_open_folders.remove(item.path)
 
     def refresh(self):
@@ -211,7 +242,7 @@ class RepoTreeView(standard.TreeView):
 
         if column == 1:
             # Status
-            size = x_width * 10
+            size = x_width * 11
         elif column == 2:
             # Summary
             size = x_width * 64
@@ -248,8 +279,9 @@ class RepoTreeView(standard.TreeView):
         self.restoring_selection = True
 
         # Restore opened folders
+        model = self.model()
         for path in sorted(self.saved_open_folders):
-            row = self.model().row(path, create=False)
+            row = model.get(path)
             if not row:
                 continue
             index = row[0].index()
@@ -261,7 +293,7 @@ class RepoTreeView(standard.TreeView):
         current_index = None
         current_path = self.saved_current_path
         if current_path:
-            row = self.model().row(current_path, create=False)
+            row = model.get(current_path)
             if row:
                 current_index = row[0].index()
 
@@ -270,7 +302,7 @@ class RepoTreeView(standard.TreeView):
 
         # Restore selected items
         for path in self.saved_selection:
-            row = self.model().row(path, create=False)
+            row = model.get(path)
             if not row:
                 continue
             index = row[0].index()
@@ -282,6 +314,21 @@ class RepoTreeView(standard.TreeView):
 
         self.size_columns()
         self.update_diff()
+
+    def event(self, ev):
+        """Respond to GitRepoInfoEvents"""
+        if ev.type() == self.info_event_type:
+            ev.accept()
+            self.apply_data(ev.data)
+        return super(RepoTreeView, self).event(ev)
+
+    def apply_data(self, data):
+        entry = self.model().get(data[0])
+        if entry:
+            entry[1].set_status(data[1])
+            entry[2].setText(data[2])
+            entry[3].setText(data[3])
+            entry[4].setText(data[4])
 
     def update_actions(self):
         """Enable/disable actions."""
@@ -378,9 +425,9 @@ class RepoTreeView(standard.TreeView):
             cached = paths[0] in main.model().staged
             cmds.do(cmds.Diff, paths[0], cached)
 
-    def setModel(self, model):
+    def set_model(self, model):
         """Set the concrete QAbstractItemModel instance."""
-        QtWidgets.QTreeView.setModel(self, model)
+        self.setModel(model)
         model.restore.connect(self.restore, type=Qt.QueuedConnection)
 
     def item_from_index(self, model_index):
@@ -434,8 +481,9 @@ class RepoTreeView(standard.TreeView):
                 if p not in untracked or p in tracked]
 
     def view_history(self):
-        """Signal that we should view history for paths."""
-        self.history.emit(self.selected_paths())
+        """Launch the configured history browser path-limited to entries."""
+        entries = list(map(ustr, entries))
+        cmds.do(cmds.VisualizePaths, entries)
 
     def untrack_selected(self):
         """untrack selected paths."""
@@ -444,7 +492,14 @@ class RepoTreeView(standard.TreeView):
     def diff_predecessor(self):
         """Diff paths against previous versions."""
         paths = self.selected_tracked_paths()
-        self.difftool_predecessor.emit(paths)
+        args = ['--'] + paths
+        revs, summaries = gitcmds.log_helper(all=False, extra_args=args)
+        commits = select_commits(N_('Select Previous Version'),
+                                 revs, summaries, multiselect=False)
+        if not commits:
+            return
+        commit = commits[0]
+        cmds.difftool_launch(left=commit, paths=paths)
 
     def current_path(self):
         """Return the path for the current item."""
@@ -454,54 +509,13 @@ class RepoTreeView(standard.TreeView):
         return self.item_from_index(index).path
 
 
-class BrowserController(QtCore.QObject):
-
-    def __init__(self, view):
-        QtCore.QObject.__init__(self, view)
-        self.model = main.model()
-        self.view = view
-        self.runtask = qtutils.RunTask(parent=self)
-
-        view.history.connect(self.view_history)
-        view.expanded.connect(self.query_model)
-        view.difftool_predecessor.connect(self.difftool_predecessor)
-
-    def view_history(self, entries):
-        """Launch the configured history browser path-limited to entries."""
-        entries = list(map(ustr, entries))
-        cmds.do(cmds.VisualizePaths, entries)
-
-    def query_model(self, model_index):
-        """Update information about a directory as it is expanded."""
-        item = self.view.item_from_index(model_index)
-        if item.cached:
-            return
-        path = item.path
-        GitRepoEntryStore.entry(path, self.view, self.runtask).update()
-        entry = GitRepoEntryStore.entry
-        for row in range(item.rowCount()):
-            path = item.child(row, 0).path
-            entry(path, self.view, self.runtask).update()
-        item.cached = True
-
-    def difftool_predecessor(self, paths):
-        """Prompt for an older commit and launch difftool against it."""
-        args = ['--'] + paths
-        revs, summaries = gitcmds.log_helper(all=False, extra_args=args)
-        commits = select_commits(N_('Select Previous Version'),
-                                 revs, summaries, multiselect=False)
-        if not commits:
-            return
-        commit = commits[0]
-        difftool.launch(left=commit, paths=paths)
-
-
 class BrowseModel(object):
+    """Context data used for browsing branches via git-ls-tree"""
 
-    def __init__(self, ref):
+    def __init__(self, ref, filename=None):
         self.ref = ref
-        self.relpath = None
-        self.filename = None
+        self.relpath = filename
+        self.filename = filename
 
 
 class SaveBlob(BaseCommand):
@@ -529,52 +543,45 @@ class SaveBlob(BaseCommand):
                 N_('File saved to "%s"') % model.filename)
 
 
-class BrowseDialog(QtWidgets.QDialog):
+class BrowseBranch(standard.Dialog):
 
-    @staticmethod
-    def browse(ref):
-        parent = qtutils.active_window()
+    @classmethod
+    def browse(cls, ref):
         model = BrowseModel(ref)
-        dlg = BrowseDialog(model, parent=parent)
+        dlg = cls(model, parent=qtutils.active_window())
         dlg_model = GitTreeModel(ref, dlg)
         dlg.setModel(dlg_model)
         dlg.setWindowTitle(N_('Browsing %s') % model.ref)
-        if hasattr(parent, 'width'):
-            dlg.resize(parent.width()*3//4, 333)
-        else:
-            dlg.resize(420, 333)
         dlg.show()
         dlg.raise_()
         if dlg.exec_() != dlg.Accepted:
             return None
         return dlg
 
-    @staticmethod
-    def select_file(ref):
+    @classmethod
+    def select_file(cls, ref):
         parent = qtutils.active_window()
         model = BrowseModel(ref)
-        dlg = BrowseDialog(model, select_file=True, parent=parent)
+        dlg = cls(model, select_file=True, parent=parent)
         dlg_model = GitTreeModel(ref, dlg)
         dlg.setModel(dlg_model)
         dlg.setWindowTitle(N_('Select file from "%s"') % model.ref)
-        dlg.resize(parent.width()*3//4, 333)
         dlg.show()
         dlg.raise_()
         if dlg.exec_() != dlg.Accepted:
             return None
         return model.filename
 
-    @staticmethod
-    def select_file_from_list(file_list, title=N_('Select File')):
+    @classmethod
+    def select_file_from_list(cls, file_list, title=N_('Select File')):
         parent = qtutils.active_window()
         model = BrowseModel(None)
-        dlg = BrowseDialog(model, select_file=True, parent=parent)
+        dlg = cls(model, select_file=True, parent=parent)
         dlg_model = GitFileTreeModel(dlg)
         dlg_model.add_files(file_list)
         dlg.setModel(dlg_model)
         dlg.expandAll()
         dlg.setWindowTitle(title)
-        dlg.resize(parent.width()*3//4, 333)
         dlg.show()
         dlg.raise_()
         if dlg.exec_() != dlg.Accepted:
@@ -582,8 +589,7 @@ class BrowseDialog(QtWidgets.QDialog):
         return model.filename
 
     def __init__(self, model, select_file=False, parent=None):
-        QtWidgets.QDialog.__init__(self, parent)
-        self.setAttribute(Qt.WA_MacMetalStyle)
+        standard.Dialog.__init__(self, parent=parent)
         if parent is not None:
             self.setWindowModality(Qt.WindowModal)
 
@@ -592,7 +598,7 @@ class BrowseDialog(QtWidgets.QDialog):
 
         # widgets
         self.tree = GitTreeWidget(parent=self)
-        self.close = qtutils.close_button()
+        self.close_button = qtutils.close_button()
 
         if select_file:
             text = N_('Select')
@@ -603,7 +609,8 @@ class BrowseDialog(QtWidgets.QDialog):
 
         # layouts
         self.btnlayt = qtutils.hbox(defs.margin, defs.spacing,
-                                    qtutils.STRETCH, self.close, self.save)
+                                    self.close_button, qtutils.STRETCH,
+                                    self.save)
 
         self.layt = qtutils.vbox(defs.margin, defs.spacing,
                                  self.tree, self.btnlayt)
@@ -618,8 +625,9 @@ class BrowseDialog(QtWidgets.QDialog):
         self.tree.selection_changed.connect(self.selection_changed,
                                             type=Qt.QueuedConnection)
 
-        qtutils.connect_button(self.close, self.reject)
+        qtutils.connect_button(self.close_button, self.close)
         qtutils.connect_button(self.save, self.save_blob)
+        self.init_size(parent=parent)
 
     def expandAll(self):
         self.tree.expandAll()
@@ -638,13 +646,8 @@ class BrowseDialog(QtWidgets.QDialog):
     def save_path(self, path):
         """Choose an output filename based on the selected path"""
         self.path_chosen(path, close=False)
-        model = self.model
-        filename = qtutils.save_as(model.filename)
-        if not filename:
-            return
-        model.filename = filename
-        cmds.do(SaveBlob, model)
-        self.accept()
+        if save_path(path, self.model):
+            self.accept()
 
     def save_blob(self):
         """Save the currently selected file"""

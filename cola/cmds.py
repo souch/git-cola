@@ -17,7 +17,6 @@ from . import gitcfg
 from . import gitcmds
 from . import icons
 from . import utils
-from . import difftool
 from . import resources
 from .diffparse import DiffParser
 from .git import STDOUT
@@ -795,8 +794,7 @@ class Difftool(Command):
         self.filenames = filenames
 
     def do(self):
-        difftool.launch_with_head(self.filenames,
-                                  self.staged, self.model.head)
+        difftool_launch_with_head(self.filenames, self.staged, self.model.head)
 
 
 class Edit(Command):
@@ -887,7 +885,7 @@ class LaunchDifftool(BaseCommand):
                     argv.extend(mergetool)
                 core.fork(argv)
         else:
-            difftool.run()
+            difftool_run()
 
 
 class LaunchTerminal(BaseCommand):
@@ -973,6 +971,49 @@ class LoadCommitMessageFromOID(Command):
 
     def do(self):
         self.model.set_commitmsg(self.new_commitmsg)
+
+    def undo(self):
+        self.model.set_commitmsg(self.old_commitmsg)
+
+
+class PrepareCommitMessageHook(Command):
+    """Use the cola-prepare-commit-msg hook to prepare the commit message
+    """
+    def __init__(self):
+        Command.__init__(self)
+        self.old_commitmsg = self.model.commitmsg
+        self.undoable = True
+
+    def get_message(self):
+
+        title = N_('Error running prepare-commitmsg hook')
+        hook = gitcmds.prepare_commit_message_hook()
+
+        if os.path.exists(hook):
+            filename = self.model.save_commitmsg()
+            status, out, err = core.run_command([hook, filename])
+
+            if status == 0:
+                result = core.read(filename)
+            else:
+                result = self.old_commitmsg
+                details = out or ''
+                if err:
+                    if details and not details.endswith('\n'):
+                        details += '\n'
+                    details += err
+                message = N_('"%s" returned exit status %d') % (hook, status)
+                Interaction.critical(title, message=message, details=details)
+        else:
+            message = N_('A hook must be provided at "%s"') % hook
+            Interaction.critical(title, message=message)
+            result = self.old_commitmsg
+
+        return result
+
+    def do(self):
+        msg = self.get_message()
+        self.model.set_commitmsg(msg)
 
     def undo(self):
         self.model.set_commitmsg(self.old_commitmsg)
@@ -1876,3 +1917,76 @@ def do_cmd(cmd):
         msg, details = utils.format_exception(e)
         Interaction.critical(N_('Error'), message=msg, details=details)
         return None
+
+
+def difftool_run():
+    """Start a default difftool session"""
+    files = selection.selected_group()
+    if not files:
+        return
+    s = selection.selection()
+    model = main.model()
+    difftool_launch_with_head(files, bool(s.staged), model.head)
+
+
+def difftool_launch_with_head(filenames, staged, head):
+    """Launch difftool against the provided head"""
+    if head == 'HEAD':
+        left = None
+    else:
+        left = head
+    difftool_launch(left=left, staged=staged, paths=filenames)
+
+
+def difftool_launch(left=None, right=None, paths=None,
+                    staged=False, dir_diff=False,
+                    left_take_magic=False, left_take_parent=False):
+    """Launches 'git difftool' with given parameters
+
+    :param left: first argument to difftool
+    :param right: second argument to difftool_args
+    :param paths: paths to diff
+    :param staged: activate `git difftool --staged`
+    :param dir_diff: activate `git difftool --dir-diff`
+    :param left_take_magic: whether to append the magic ^! diff expression
+    :param left_take_parent: whether to append the first-parent ~ for diffing
+
+    """
+
+    difftool_args = ['git', 'difftool', '--no-prompt']
+    if staged:
+        difftool_args.append('--cached')
+    if dir_diff:
+        difftool_args.append('--dir-diff')
+
+    if left:
+        if left_take_parent or left_take_magic:
+            suffix = left_take_magic and '^!' or '~'
+            # Check root commit (no parents and thus cannot execute '~')
+            model = main.model()
+            git = model.git
+            status, out, err = git.rev_list(left, parents=True, n=1)
+            Interaction.log_status(status, out, err)
+            if status:
+                raise OSError('git rev-list command failed')
+
+            if len(out.split()) >= 2:
+                # Commit has a parent, so we can take its child as requested
+                left += suffix
+            else:
+                # No parent, assume it's the root commit, so we have to diff
+                # against the empty tree.  Git's empty tree is a built-in
+                # constant object name.
+                left = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+                if not right and left_take_magic:
+                    right = left
+        difftool_args.append(left)
+
+    if right:
+        difftool_args.append(right)
+
+    if paths:
+        difftool_args.append('--')
+        difftool_args.extend(paths)
+
+    core.fork(difftool_args)

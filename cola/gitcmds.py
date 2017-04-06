@@ -36,8 +36,41 @@ def diff_index_filenames(ref):
 def diff_filenames(*args):
     """Return a list of filenames that have been modified"""
     out = git.diff_tree(name_only=True, no_commit_id=True, r=True, z=True,
-                        *args)[STDOUT]
+                        _readonly=True, *args)[STDOUT]
     return _parse_diff_filenames(out)
+
+
+def listdir(dirname, ref='HEAD'):
+    """Get the contents of a directory according to Git
+
+    Query Git for the content of a directory, taking ignored
+    files into account.
+
+    """
+    dirs = []
+    files = []
+
+    # first, parse git ls-tree to get the tracked files
+    # in a list of (type, path) tuples
+    entries = ls_tree(dirname, ref=ref)
+    for entry in entries:
+        if entry[0][0] == 't':  # tree
+            dirs.append(entry[1])
+        else:
+            files.append(entry[1])
+
+    # gather untracked files
+    untracked = untracked_files(paths=[dirname], directory=True)
+    for path in untracked:
+        if path.endswith('/'):
+            dirs.append(path[:-1])
+        else:
+            files.append(path)
+
+    dirs.sort()
+    files.sort()
+
+    return (dirs, files)
 
 
 def diff(args):
@@ -146,9 +179,19 @@ def branch_list(remote=False):
         return for_each_ref_basename('refs/heads')
 
 
+def _version_sort():
+    if version.check_git('version-sort'):
+        sort = 'version:refname'
+    else:
+        sort = False
+    return sort
+
+
 def for_each_ref_basename(refs, git=git):
     """Return refs starting with 'refs'."""
-    out = git.for_each_ref(refs, format='%(refname)')[STDOUT]
+    sort = _version_sort()
+    status, out, err = git.for_each_ref(refs, format='%(refname)',
+                                        sort=sort, _readonly=True)
     output = out.splitlines()
     non_heads = [x for x in output if not x.endswith('/HEAD')]
     return list(map(lambda x: x[len(refs) + 1:], non_heads))
@@ -167,12 +210,15 @@ def all_refs(split=False, git=git):
     query = (triple('refs/tags', tags),
              triple('refs/heads', local_branches),
              triple('refs/remotes', remote_branches))
-    out = git.for_each_ref(format='%(refname)')[STDOUT]
+    sort = _version_sort()
+    status, out, err = git.for_each_ref(format='%(refname)',
+                                        sort=sort, _readonly=True)
     for ref in out.splitlines():
         for prefix, prefix_len, dst in query:
             if ref.startswith(prefix) and not ref.endswith('/HEAD'):
                 dst.append(ref[prefix_len:])
                 continue
+    tags.reverse()
     if split:
         return local_branches, remote_branches, tags
     else:
@@ -199,14 +245,14 @@ def tracked_branch(branch=None, config=None):
     return None
 
 
-def untracked_files(git=git, paths=None):
+def untracked_files(git=git, paths=None, **kwargs):
     """Returns a sorted list of untracked files."""
 
     if paths is None:
         paths = []
     args = ['--'] + paths
     out = git.ls_files(z=True, others=True, exclude_standard=True,
-                       *args)[STDOUT]
+                       *args, **kwargs)[STDOUT]
     if out:
         return out[:-1].split('\0')
     return []
@@ -214,12 +260,14 @@ def untracked_files(git=git, paths=None):
 
 def tag_list():
     """Return a list of tags."""
-    return list(reversed(for_each_ref_basename('refs/tags')))
+    result = for_each_ref_basename('refs/tags')
+    result.reverse()
+    return result
 
 
 def log(git, *args, **kwargs):
     return git.log(no_color=True, no_abbrev_commit=True,
-                   no_ext_diff=True, *args, **kwargs)[STDOUT]
+                   no_ext_diff=True, _readonly=True, *args, **kwargs)[STDOUT]
 
 
 def commit_diff(oid, git=git):
@@ -272,7 +320,8 @@ def oid_diff(git, oid, filename=None):
         # "git show" is clever enough to handle the root commit.
         args = [oid + '^!']
         _add_filename(args, filename)
-        status, out, err = git.show(pretty='format:', *args, **opts)
+        status, out, err = git.show(pretty='format:', _readonly=True,
+                                    *args, **opts)
         out = out.lstrip()
     return out
 
@@ -347,8 +396,7 @@ def extract_diff_header(status, deleted,
     del_tag = 'deleted file mode '
     output = StringIO()
 
-    diff = diffoutput.split('\n')
-    for line in diff:
+    for line in diffoutput.splitlines():
         if not start and '@@' == line[:2] and '@@' in line[2:]:
             start = True
         if start or (deleted and del_tag in line):
@@ -359,7 +407,7 @@ def extract_diff_header(status, deleted,
             elif not suppress_header:
                 output.write(line + '\n')
 
-    result = output.getvalue()
+    result = output.getvalue().rstrip('\n')
     output.close()
 
     if with_diff_header:
@@ -563,7 +611,7 @@ def _branch_status(branch):
 
 def merge_base(head, ref):
     """Given `ref`, return $(git merge-base ref HEAD)..ref."""
-    return git.merge_base(head, ref)[STDOUT]
+    return git.merge_base(head, ref, _readonly=True)[STDOUT]
 
 
 def merge_base_parent(branch):
@@ -576,7 +624,7 @@ def merge_base_parent(branch):
 def parse_ls_tree(rev):
     """Return a list of (mode, type, oid, path) tuples."""
     output = []
-    lines = git.ls_tree(rev, r=True)[STDOUT].splitlines()
+    lines = git.ls_tree(rev, r=True, _readonly=True)[STDOUT].splitlines()
     regex = re.compile(r'^(\d+)\W(\w+)\W(\w+)[ \t]+(.*)$')
     for line in lines:
         match = regex.match(line)
@@ -588,6 +636,24 @@ def parse_ls_tree(rev):
             output.append((mode, objtype, oid, filename,))
     return output
 
+
+def ls_tree(path, ref='HEAD'):
+    """Return a parsed git ls-tree result for a single directory"""
+
+    result = []
+    status, out, err = git.ls_tree(ref, '--', path, z=True, full_tree=True)
+    if status == 0 and out:
+        for line in out[:-1].split('\0'):
+            # .....6 ...4 ......................................40
+            # 040000 tree c127cde9a0c644a3a8fef449a244f47d5272dfa6	relative
+            # 100644 blob 139e42bf4acaa4927ec9be1ec55a252b97d3f1e2	relative/path
+            # 0..... 7... 12......................................	53
+            # path offset = 6 + 1 + 4 + 1 + 40 + 1 = 53
+            objtype = line[7:11]
+            relpath = line[53:]
+            result.append((objtype, relpath))
+
+    return result
 
 # A regex for matching the output of git(log|rev-list) --pretty=oneline
 REV_LIST_REGEX = re.compile(r'^([0-9a-f]{40}) (.*)$')
@@ -630,7 +696,7 @@ def rev_list_range(start, end):
 
 def commit_message_path():
     """Return the path to .git/GIT_COLA_MSG"""
-    path = git.git_path("GIT_COLA_MSG")
+    path = git.git_path('GIT_COLA_MSG')
     if core.exists(path):
         return path
     return None
@@ -643,6 +709,13 @@ def merge_message_path():
         if core.exists(path):
             return path
     return None
+
+
+def prepare_commit_message_hook(config=None):
+    default_hook = git.git_path('hooks', 'cola-prepare-commit-msg')
+    if config is None:
+        config = gitcfg.current()
+    return config.get('cola.preparecommitmessagehook', default_hook)
 
 
 def abort_merge():

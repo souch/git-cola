@@ -20,6 +20,7 @@ Please install it before using git-cola, e.g.:
 """
     core.error(errmsg)
 
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 # Import cola modules
@@ -28,6 +29,7 @@ from .i18n import N_
 from .interaction import Interaction
 from .models import main
 from .widgets import cfgactions
+from .widgets import defs
 from .widgets import startup
 from .settings import Session
 from . import cmds
@@ -118,6 +120,24 @@ def setup_environment():
     compat.setenv('GIT_MERGE_AUTOEDIT', 'no')
 
 
+def get_icon_themes():
+    """Return the default icon theme names"""
+    themes = []
+
+    icon_themes_env = core.getenv('GIT_COLA_ICON_THEME')
+    if icon_themes_env:
+        themes.extend([x for x in icon_themes_env.split(':') if x])
+
+    icon_themes_cfg = gitcfg.current().get_all('cola.icontheme')
+    if icon_themes_cfg:
+        themes.extend(icon_themes_cfg)
+
+    if not themes:
+        themes.append('light')
+
+    return themes
+
+
 # style note: we use camelCase here since we're masquerading a Qt class
 class ColaApplication(object):
     """The main cola application
@@ -125,20 +145,90 @@ class ColaApplication(object):
     ColaApplication handles i18n of user-visible data
     """
 
-    def __init__(self, argv, locale=None, gui=True):
+    def __init__(self, argv, locale=None, gui=True, icon_themes=None):
         cfgactions.install()
         i18n.install(locale)
         qtcompat.install()
         qtutils.install()
-        icons.install()
+        icons.install(icon_themes or get_icon_themes())
 
         fsmonitor.current().files_changed.connect(self._update_files)
 
         if gui:
             self._app = current(tuple(argv))
             self._app.setWindowIcon(icons.cola())
+            self._install_style()
         else:
             self._app = QtCore.QCoreApplication(argv)
+
+    def _install_style(self):
+        palette = self._app.palette()
+        window = palette.color(QtGui.QPalette.Window)
+        highlight = palette.color(QtGui.QPalette.Highlight)
+        shadow = palette.color(QtGui.QPalette.Shadow)
+        base = palette.color(QtGui.QPalette.Base)
+
+        window_rgb = qtutils.rgb_css(window)
+        highlight_rgb = qtutils.rgb_css(highlight)
+        shadow_rgb = qtutils.rgb_css(shadow)
+        base_rgb = qtutils.rgb_css(base)
+
+        self._app.setStyleSheet("""
+            QCheckBox::indicator {
+                width: %(checkbox_size)spx;
+                height: %(checkbox_size)spx;
+            }
+            QCheckBox::indicator::unchecked {
+                border: %(checkbox_border)spx solid %(shadow_rgb)s;
+                background: %(base_rgb)s;
+            }
+            QCheckBox::indicator::checked {
+                image: url(%(checkbox_icon)s);
+                border: %(checkbox_border)spx solid %(shadow_rgb)s;
+                background: %(base_rgb)s;
+            }
+
+            QRadioButton::indicator {
+                width: %(radio_size)spx;
+                height: %(radio_size)spx;
+            }
+            QRadioButton::indicator::unchecked {
+                border: %(radio_border)spx solid %(shadow_rgb)s;
+                border-radius: %(radio_radius)spx;
+                background: %(base_rgb)s;
+            }
+            QRadioButton::indicator::checked {
+                image: url(%(radio_icon)s);
+                border: %(radio_border)spx solid %(shadow_rgb)s;
+                border-radius: %(radio_radius)spx;
+                background: %(base_rgb)s;
+            }
+
+            QSplitter::handle:hover {
+                background: %(highlight_rgb)s;
+            }
+
+            QMainWindow::separator {
+                background: %(window_rgb)s;
+                width: %(separator)spx;
+                height: %(separator)spx;
+            }
+            QMainWindow::separator:hover {
+                background: %(highlight_rgb)s;
+            }
+
+            """ % dict(separator=defs.separator,
+                       window_rgb=window_rgb,
+                       highlight_rgb=highlight_rgb,
+                       shadow_rgb=shadow_rgb,
+                       base_rgb=base_rgb,
+                       checkbox_border=defs.border,
+                       checkbox_icon=icons.check_name(),
+                       checkbox_size=defs.checkbox,
+                       radio_border=defs.radio_border,
+                       radio_icon=icons.dot_name(),
+                       radio_radius=defs.checkbox//2,
+                       radio_size=defs.checkbox))
 
     def activeWindow(self):
         """Wrap activeWindow()"""
@@ -254,10 +344,7 @@ def application_start(context, view):
     # Start the filesystem monitor thread
     fsmonitor.current().start()
 
-    msg_timer = QtCore.QTimer()
-    msg_timer.setSingleShot(True)
-    msg_timer.timeout.connect(_send_msg)
-    msg_timer.start(0)
+    QtCore.QTimer.singleShot(0, _send_msg)
 
     # Start the event loop
     result = context.app.exec_()
@@ -282,6 +369,11 @@ def add_common_arguments(parser):
     parser.add_argument('--prompt', action='store_true', default=False,
                         help='prompt for a repository')
 
+    # Specify the icon theme
+    parser.add_argument('--icon-theme', metavar='<theme>',
+                        dest='icon_themes', action='append', default=[],
+                        help='specify an icon theme (name or directory)')
+
     # Resume an X Session Management session
     parser.add_argument('-session', metavar='<session>', default=None,
                         help=argparse.SUPPRESS)
@@ -289,7 +381,7 @@ def add_common_arguments(parser):
 
 def new_application(args):
     # Initialize the app
-    return ColaApplication(sys.argv)
+    return ColaApplication(sys.argv, icon_themes=args.icon_themes)
 
 
 def new_model(app, repo, prompt=False, settings=None):
@@ -334,9 +426,17 @@ def init_update_task(parent, runtask, model):
 
 
 def _send_msg():
-    if git.GIT_COLA_TRACE == 'trace':
-        msg = 'info: debug mode enabled using GIT_COLA_TRACE=trace'
-        Interaction.log(msg)
+    trace = git.GIT_COLA_TRACE
+    if trace == '2' or trace == 'trace':
+        msg1 = 'info: debug level 2: trace mode enabled'
+        msg2 = 'info: set GIT_COLA_TRACE=1 for less-verbose output'
+        Interaction.log(msg1)
+        Interaction.log(msg2)
+    elif trace:
+        msg1 = 'info: debug level 1'
+        msg2 = 'info: set GIT_COLA_TRACE=2 for trace mode'
+        Interaction.log(msg1)
+        Interaction.log(msg2)
 
 
 class ApplicationContext(object):

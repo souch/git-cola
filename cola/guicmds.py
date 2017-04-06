@@ -6,13 +6,12 @@ from .i18n import N_
 from .interaction import Interaction
 from .models import main
 from .widgets import completion
-from .widgets.browse import BrowseDialog
+from .widgets.browse import BrowseBranch
 from .widgets.selectcommits import select_commits
 from . import cmds
 from . import core
 from . import difftool
 from . import gitcmds
-from . import hotkeys
 from . import icons
 from . import qtutils
 from . import utils
@@ -45,7 +44,7 @@ def delete_remote_branch():
 def browse_current():
     """Launch the 'Browse Current Branch' dialog."""
     branch = gitcmds.current_branch()
-    BrowseDialog.browse(branch)
+    BrowseBranch.browse(branch)
 
 
 def browse_other():
@@ -54,7 +53,7 @@ def browse_other():
     branch = choose_ref(N_('Browse Commits...'), N_('Browse'))
     if not branch:
         return
-    BrowseDialog.browse(branch)
+    BrowseBranch.browse(branch)
 
 
 def checkout_branch():

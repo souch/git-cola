@@ -63,7 +63,6 @@ class ApplyPatches(Dialog):
 
     def __init__(self, parent=None):
         super(ApplyPatches, self).__init__(parent=parent)
-        self.setAttribute(Qt.WA_MacMetalStyle)
         self.setWindowTitle(N_('Apply Patches'))
         self.setAcceptDrops(True)
         if parent is not None:
@@ -108,8 +107,8 @@ class ApplyPatches(Dialog):
                                        qtutils.STRETCH, self.usage)
 
         self.bottom_layout = qtutils.hbox(defs.no_margin, defs.button_spacing,
-                                          self.apply_button, qtutils.STRETCH,
-                                          self.close_button)
+                                          self.close_button, qtutils.STRETCH,
+                                          self.apply_button)
 
         self.main_layout = qtutils.vbox(defs.margin, defs.spacing,
                                         self.top_layout, self.tree,

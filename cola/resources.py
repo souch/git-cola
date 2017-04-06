@@ -8,6 +8,9 @@ from os.path import dirname
 from . import core
 
 
+# Default git-cola icon theme
+_default_icon_theme = 'light'
+
 _modpath = core.abspath(__file__)
 if os.path.join('share', 'git-cola', 'lib') in _modpath:
     # this is the release tree
@@ -57,9 +60,32 @@ def share(*args):
     return prefix('share', 'git-cola', *args)
 
 
-def icon_dir():
-    """Return the path to the style dir within the cola install tree."""
-    return share('icons')
+def icon_dir(theme):
+    """Return the path to the icons directory
+
+    This typically returns share/git-cola/icons within
+    the git-cola installation prefix.
+
+    When theme is defined then it will return a subdirectory of the icons/
+    directory, e.g. "dark" for the dark icon theme.
+
+    When theme is set to an absolute directory path, that directory will be
+    returned, which effectively makes git-cola use those icons.
+
+    """
+
+    if not theme or theme == _default_icon_theme:
+        icons = share('icons')
+    else:
+        theme_dir = share('icons', theme)
+        if os.path.isabs(theme) and os.path.isdir(theme):
+            icons = theme
+        elif os.path.isdir(theme_dir):
+            icons = theme_dir
+        else:
+            icons = share('icons')
+
+    return icons
 
 
 def config_home(*args):

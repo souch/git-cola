@@ -26,6 +26,14 @@ STRETCH = object()
 SKIPPED = object()
 
 
+def disconnect(signal):
+    """Disconnect signal from all slots"""
+    try:
+        signal.disconnect()
+    except TypeError:  # allow unconnected slots
+        pass
+
+
 def connect_action(action, fn):
     """Connect an action to a function"""
     action.triggered[bool].connect(lambda x: fn())
@@ -39,6 +47,11 @@ def connect_action_bool(action, fn):
 def connect_button(button, fn):
     """Connect a button to a function"""
     button.pressed.connect(fn)
+
+
+def connect_released(button, fn):
+    """Connect a button to a function"""
+    button.released.connect(fn)
 
 
 def button_action(button, action):
@@ -146,18 +159,21 @@ def splitter(orientation, *widgets):
     layout.setOrientation(orientation)
     layout.setHandleWidth(defs.handle_width)
     layout.setChildrenCollapsible(True)
+
     for idx, widget in enumerate(widgets):
         layout.addWidget(widget)
         layout.setStretchFactor(idx, 1)
 
+    # Workaround for Qt not setting the WA_Hover property for QSplitter
+    # Cf. https://bugreports.qt.io/browse/QTBUG-13768
+    layout.handle(1).setAttribute(Qt.WA_Hover)
+
     return layout
 
 
-def label(text=None, align=None, fmt=None, selectable=True, stylesheet=None):
+def label(text=None, align=None, fmt=None, selectable=True):
     """Create a QLabel with the specified properties"""
     widget = QtWidgets.QLabel()
-    if stylesheet:
-        widget.setStyleSheet(stylesheet)
     if align is not None:
         widget.setAlignment(align)
     if fmt is not None:
@@ -177,6 +193,14 @@ def textbrowser(text=None):
     if text:
         widget.setText(text)
     return widget
+
+
+def add_completer(widget, items):
+    """Add simple completion to a widget"""
+    completer = QtWidgets.QCompleter(items, widget)
+    completer.setCaseSensitivity(Qt.CaseInsensitive)
+    completer.setCompletionMode(QtWidgets.QCompleter.InlineCompletion)
+    widget.setCompleter(completer)
 
 
 def prompt(msg, title=None, text=''):
@@ -574,8 +598,14 @@ def add_close_action(widget):
                       widget.close, hotkeys.CLOSE, hotkeys.QUIT)
 
 
+def app():
+    """Return the current application"""
+    return QtWidgets.QApplication.instance()
+
+
 def desktop():
-    return QtWidgets.QApplication.instance().desktop()
+    """Return the desktop"""
+    return app().desktop()
 
 
 def center_on_screen(widget):
@@ -587,11 +617,12 @@ def center_on_screen(widget):
     widget.move(cx - widget.width()//2, cy - widget.height()//2)
 
 
-def default_size(parent, width, height):
+def default_size(parent, width, height, use_parent_height=True):
     """Return the parent's size, or the provided defaults"""
     if parent is not None:
         width = parent.width()
-        height = parent.height()
+        if use_parent_height:
+            height = parent.height()
     return (width, height)
 
 
@@ -675,8 +706,9 @@ def refresh_button(enabled=True, default=False):
 
 
 def hide_button_menu_indicator(button):
-    cls = type(button)
-    name = cls.__name__
+    """Hide the menu indicator icon on buttons"""
+
+    name = button.__class__.__name__
     stylesheet = """
         %(name)s::menu-indicator {
             image: none;
@@ -688,72 +720,29 @@ def hide_button_menu_indicator(button):
                 border-style: none;
             }
         """
-    button.setStyleSheet(stylesheet % {'name': name})
+    button.setStyleSheet(stylesheet % dict(name=name))
 
 
 def checkbox(text='', tooltip='', checked=None):
-    cb = QtWidgets.QCheckBox()
-    if text:
-        cb.setText(text)
-    if tooltip:
-        cb.setToolTip(tooltip)
-    if checked is not None:
-        cb.setChecked(checked)
-
-    url = icons.check_name()
-    style = """
-        QCheckBox::indicator {
-            width: %(size)dpx;
-            height: %(size)dpx;
-        }
-        QCheckBox::indicator::unchecked {
-            border: %(border)dpx solid #999;
-            background: #fff;
-        }
-        QCheckBox::indicator::checked {
-            image: url(%(url)s);
-            border: %(border)dpx solid black;
-            background: #fff;
-        }
-    """ % dict(size=defs.checkbox, border=defs.border, url=url)
-    cb.setStyleSheet(style)
-
-    return cb
+    """Create a checkbox"""
+    return _checkbox(QtWidgets.QCheckBox, text, tooltip, checked)
 
 
 def radio(text='', tooltip='', checked=None):
-    rb = QtWidgets.QRadioButton()
+    """Create a radio button"""
+    return _checkbox(QtWidgets.QRadioButton, text, tooltip, checked)
+
+
+def _checkbox(cls, text, tooltip, checked):
+    """Create a widget and apply properties"""
+    widget = cls()
     if text:
-        rb.setText(text)
+        widget.setText(text)
     if tooltip:
-        rb.setToolTip(tooltip)
+        widget.setToolTip(tooltip)
     if checked is not None:
-        rb.setChecked(checked)
-
-    size = defs.checkbox
-    radius = size / 2
-    border = defs.radio_border
-    url = icons.dot_name()
-    style = """
-        QRadioButton::indicator {
-            width: %(size)dpx;
-            height: %(size)dpx;
-        }
-        QRadioButton::indicator::unchecked {
-            background: #fff;
-            border: %(border)dpx solid #999;
-            border-radius: %(radius)dpx;
-        }
-        QRadioButton::indicator::checked {
-            image: url(%(url)s);
-            background: #fff;
-            border: %(border)dpx solid black;
-            border-radius: %(radius)dpx;
-        }
-    """ % dict(size=size, radius=radius, border=border, url=url)
-    rb.setStyleSheet(style)
-
-    return rb
+        widget.setChecked(checked)
+    return widget
 
 
 class DockTitleBarWidget(QtWidgets.QWidget):
@@ -761,11 +750,10 @@ class DockTitleBarWidget(QtWidgets.QWidget):
     def __init__(self, parent, title, stretch=True):
         QtWidgets.QWidget.__init__(self, parent)
         self.setAutoFillBackground(True)
-        self.label = qlabel = QtWidgets.QLabel()
+        self.label = qlabel = QtWidgets.QLabel(title, self)
         font = qlabel.font()
         font.setBold(True)
         qlabel.setFont(font)
-        qlabel.setText(title)
         qlabel.setCursor(Qt.OpenHandCursor)
 
         self.close_button = create_action_button(
@@ -817,6 +805,7 @@ def create_dock(title, parent, stretch=True):
     dock.setObjectName(title)
     titlebar = DockTitleBarWidget(dock, title, stretch=stretch)
     dock.setTitleBarWidget(titlebar)
+    dock.setAutoFillBackground(True)
     if hasattr(parent, 'dockwidgets'):
         parent.dockwidgets.append(dock)
     return dock
@@ -982,15 +971,30 @@ class RunTask(QtCore.QObject):
 
 # Syntax highlighting
 
+def rgb(r, g, b):
+    color = QtGui.QColor()
+    color.setRgb(r, g, b)
+    return color
+
+
 def rgba(r, g, b, a=255):
-    c = QtGui.QColor()
-    c.setRgb(r, g, b)
-    c.setAlpha(a)
-    return c
+    color = rgb(r, g, b)
+    color.setAlpha(a)
+    return color
 
 
 def RGB(args):
-    return rgba(*args)
+    return rgb(*args)
+
+
+def rgb_css(color):
+    """Convert a QColor into an rgb(int, int, int) CSS string"""
+    return 'rgb(%d, %d, %d)' % (color.red(), color.green(), color.blue())
+
+
+def rgb_hex(color):
+    """Convert a QColor into a hex aabbcc string"""
+    return '%x%x%x' % (color.red(), color.green(), color.blue())
 
 
 def make_format(fg=None, bg=None, bold=False):

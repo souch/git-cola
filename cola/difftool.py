@@ -1,99 +1,24 @@
 from __future__ import division, absolute_import, unicode_literals
 
-from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
 
-from . import core
+from . import cmds
 from . import gitcmds
 from . import hotkeys
 from . import icons
 from . import qtutils
 from . import utils
 from .i18n import N_
-from .interaction import Interaction
-from .models import main
-from .models import selection
 from .widgets import completion
 from .widgets import defs
 from .widgets import filetree
-
-
-def run():
-    """Start a default difftool session"""
-    files = selection.selected_group()
-    if not files:
-        return
-    s = selection.selection()
-    model = main.model()
-    launch_with_head(files, bool(s.staged), model.head)
-
-
-def launch_with_head(filenames, staged, head):
-    """Launch difftool against the provided head"""
-    if head == 'HEAD':
-        left = None
-    else:
-        left = head
-    launch(left=left, staged=staged, paths=filenames)
-
-
-def launch(left=None, right=None, paths=None, staged=False, dir_diff=False,
-           left_take_magic=False, left_take_parent=False):
-    """Launches 'git difftool' with given parameters
-
-    :param left: first argument to difftool
-    :param right: second argument to difftool_args
-    :param paths: paths to diff
-    :param staged: activate `git difftool --staged`
-    :param dir_diff: activate `git difftool --dir-diff`
-    :param left_take_magic: whether to append the magic ^! diff expression
-    :param left_take_parent: whether to append the first-parent ~ for diffing
-
-    """
-
-    difftool_args = ['git', 'difftool', '--no-prompt']
-    if staged:
-        difftool_args.append('--cached')
-    if dir_diff:
-        difftool_args.append('--dir-diff')
-
-    if left:
-        if left_take_parent or left_take_magic:
-            suffix = left_take_magic and '^!' or '~'
-            # Check root commit (no parents and thus cannot execute '~')
-            model = main.model()
-            git = model.git
-            status, out, err = git.rev_list(left, parents=True, n=1)
-            Interaction.log_status(status, out, err)
-            if status:
-                raise OSError('git rev-list command failed')
-
-            if len(out.split()) >= 2:
-                # Commit has a parent, so we can take its child as requested
-                left += suffix
-            else:
-                # No parent, assume it's the root commit, so we have to diff
-                # against the empty tree.  Git's empty tree is a built-in
-                # constant object name.
-                left = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
-                if not right and left_take_magic:
-                    right = left
-        difftool_args.append(left)
-
-    if right:
-        difftool_args.append(right)
-
-    if paths:
-        difftool_args.append('--')
-        difftool_args.extend(paths)
-
-    core.fork(difftool_args)
+from .widgets import standard
 
 
 def diff_commits(parent, a, b):
     """Show a dialog for diffing two commits"""
-    dlg = FileDiffDialog(parent, a=a, b=b)
+    dlg = Difftool(parent, a=a, b=b)
     dlg.show()
     dlg.raise_()
     return dlg.exec_() == QtWidgets.QDialog.Accepted
@@ -104,7 +29,7 @@ def diff_expression(parent, expr,
                     hide_expr=False,
                     focus_tree=False):
     """Show a diff dialog for diff expressions"""
-    dlg = FileDiffDialog(parent,
+    dlg = Difftool(parent,
                          expr=expr,
                          hide_expr=hide_expr,
                          focus_tree=focus_tree)
@@ -115,14 +40,13 @@ def diff_expression(parent, expr,
     return dlg.exec_() == QtWidgets.QDialog.Accepted
 
 
-class FileDiffDialog(QtWidgets.QDialog):
+class Difftool(standard.Dialog):
 
     def __init__(self, parent, a=None, b=None, expr=None, title=None,
                  hide_expr=False, focus_tree=False):
         """Show files with differences and launch difftool"""
 
-        QtWidgets.QDialog.__init__(self, parent)
-        self.setAttribute(Qt.WA_MacMetalStyle)
+        standard.Dialog.__init__(self, parent=parent)
 
         self.a = a
         self.b = b
@@ -132,7 +56,7 @@ class FileDiffDialog(QtWidgets.QDialog):
             title = N_('git-cola diff')
 
         self.setWindowTitle(title)
-        self.setWindowModality(QtCore.Qt.WindowModal)
+        self.setWindowModality(Qt.WindowModal)
 
         self.expr = completion.GitRefLineEdit(parent=self)
         if expr is not None:
@@ -145,17 +69,23 @@ class FileDiffDialog(QtWidgets.QDialog):
 
         self.diff_button = qtutils.create_button(text=N_('Compare'),
                                                  icon=icons.diff(),
-                                                 enabled=False)
+                                                 enabled=False,
+                                                 default=True)
+        self.diff_button.setShortcut(hotkeys.DIFF)
+
         self.diff_all_button = qtutils.create_button(text=N_('Compare All'),
                                                      icon=icons.diff())
+        self.edit_button = qtutils.edit_button()
+        self.edit_button.setShortcut(hotkeys.EDIT)
+
         self.close_button = qtutils.close_button()
 
         self.button_layout = qtutils.hbox(defs.no_margin, defs.spacing,
+                                          self.close_button,
                                           qtutils.STRETCH,
-                                          self.diff_button,
+                                          self.edit_button,
                                           self.diff_all_button,
-                                          defs.spacing,
-                                          self.close_button)
+                                          self.diff_button)
 
         self.main_layout = qtutils.vbox(defs.margin, defs.spacing,
                                         self.expr, self.tree,
@@ -175,6 +105,7 @@ class FileDiffDialog(QtWidgets.QDialog):
         qtutils.connect_button(self.diff_button, self.diff)
         qtutils.connect_button(self.diff_all_button,
                                lambda: self.diff(dir_diff=True))
+        qtutils.connect_button(self.edit_button, self.edit)
         qtutils.connect_button(self.close_button, self.close)
 
         qtutils.add_action(self, 'Focus Input', self.focus_input, hotkeys.FOCUS)
@@ -182,11 +113,16 @@ class FileDiffDialog(QtWidgets.QDialog):
                            hotkeys.CTRL_ENTER, hotkeys.CTRL_RETURN)
         qtutils.add_close_action(self)
 
-        self.resize(720, 420)
-        self.refresh()
+        self.init_state(None, self.resize_widget, parent)
 
+        self.refresh()
         if focus_tree:
             self.focus_tree()
+
+    def resize_widget(self, parent):
+        """Set the initial size of the widget"""
+        width, height = qtutils.default_size(parent, 720, 420)
+        self.resize(width, height)
 
     def focus_tree(self):
         """Focus the files tree"""
@@ -225,12 +161,13 @@ class FileDiffDialog(QtWidgets.QDialog):
     def tree_double_clicked(self, item, column):
         path = self.tree.filename_from_item(item)
         left, right = self._left_right_args()
-        launch(left=left, right=right, paths=[path])
+        cmds.difftool_launch(left=left, right=right, paths=[path])
 
     def diff(self, dir_diff=False):
         paths = self.tree.selected_filenames()
         left, right = self._left_right_args()
-        launch(left=left, right=right, paths=paths, dir_diff=dir_diff)
+        cmds.difftool_launch(left=left, right=right, paths=paths,
+                             dir_diff=dir_diff)
 
     def _left_right_args(self):
         if self.diff_arg:
@@ -242,3 +179,7 @@ class FileDiffDialog(QtWidgets.QDialog):
         else:
             right = None
         return (left, right)
+
+    def edit(self):
+        paths = self.tree.selected_filenames()
+        cmds.do(cmds.Edit, paths)

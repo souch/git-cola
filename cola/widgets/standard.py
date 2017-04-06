@@ -9,13 +9,14 @@ from qtpy.QtCore import Qt
 from qtpy.QtCore import Signal
 from qtpy.QtWidgets import QDockWidget
 
+from ..settings import Settings
 from .. import core
 from .. import gitcfg
 from .. import qtcompat
 from .. import qtutils
 from .. import utils
-from ..settings import Settings
 from . import defs
+
 
 class WidgetMixin(object):
     """Mix-in for common utilities and serialization of widget state"""
@@ -56,10 +57,10 @@ class WidgetMixin(object):
         return self.__class__.__name__.lower()
 
     def save_state(self, settings=None):
-        if settings is None:
-            settings = Settings()
-            settings.load()
         if gitcfg.current().get('cola.savewindowsettings', True):
+            if settings is None:
+                settings = Settings()
+                settings.load()
             settings.save_gui_state(self)
 
     def resizeEvent(self, event):
@@ -71,12 +72,14 @@ class WidgetMixin(object):
         # after all the events have been processsed.
         # Timer with a delay of zero will trigger immediately after control
         # returns to the main loop.
-        QtCore.QTimer.singleShot(0, lambda: self._store_unmaximized_dimensions())
+        QtCore.QTimer.singleShot(
+                0, lambda: self._store_unmaximized_dimensions())
 
     def moveEvent(self, event):
         super(WidgetMixin, self).moveEvent(event)
         # as per the QObject::resizeEvent() override
-        QtCore.QTimer.singleShot(0, lambda: self._store_unmaximized_dimensions())
+        QtCore.QTimer.singleShot(
+                0, lambda: self._store_unmaximized_dimensions())
 
     def _store_unmaximized_dimensions(self):
         state = self.windowState()
@@ -100,20 +103,24 @@ class WidgetMixin(object):
         """Imports data for view save/restore"""
         result = True
         try:
-            x, y = int(state['x']), int(state['y'])
-            self.move(x, y)
-
             width, height = int(state['width']), int(state['height'])
             self.resize(width, height)
 
+            x, y = int(state['x']), int(state['y'])
+            self.move(x, y)
+
             # calling resize/move won't invoke QWidget::{resize,move}Event
+            # so store the unmaximized size if we properly restored.
             self._unmaximized_rect = (x, y, width, height)
         except:
             result = False
         try:
             if state['maximized']:
                 try:
-                    self.resize_to_desktop()
+                    if utils.is_win32() or utils.is_darwin():
+                        self.resize_to_desktop()
+                    else:
+                        self.showMaximized()
                 except:
                     pass
         except:
@@ -133,31 +140,44 @@ class WidgetMixin(object):
         # when maximized we don't want to overwrite saved x/y/width/height with
         # desktop dimensions.
         if maximized:
+            rect = self._unmaximized_rect
             try:
-                ret['x'], ret['y'], ret['width'], ret['height'] = self._unmaximized_rect
+                ret['x'], ret['y'], ret['width'], ret['height'] = rect
             except:
                 pass
         else:
-            ret['width'], ret['height'] = self.width(), self.height()
-            ret['x'], ret['y'] = self.x(), self.y()
+            ret['width'] = self.width()
+            ret['height'] = self.height()
+            ret['x'] = self.x()
+            ret['y'] = self.y()
 
         return ret
 
-    def save_settings(self):
-        settings = Settings()
-        settings.load()
-        settings.add_recent(core.getcwd())
+    def save_settings(self, settings=None):
         return self.save_state(settings=settings)
 
     def closeEvent(self, event):
         self.save_settings()
         self.Base.closeEvent(self, event)
 
+    def init_size(self, parent=None, settings=None, width=0, height=0):
+        if not width:
+            width = defs.dialog_w
+        if not height:
+            height = defs.dialog_h
+        self.init_state(settings,
+                        self.resize_to_parent, parent, width, height)
+
     def init_state(self, settings, callback, *args, **kwargs):
         """Restore saved settings or set the initial location"""
         if not self.restore_state(settings=settings):
             callback(*args, **kwargs)
             self.center()
+
+    def resize_to_parent(self, parent, w, h):
+        """Set the initial size of the widget"""
+        width, height = qtutils.default_size(parent, w, h)
+        self.resize(width, height)
 
 
 class MainWindowMixin(WidgetMixin):
@@ -177,6 +197,13 @@ class MainWindowMixin(WidgetMixin):
         state['lock_layout'] = self.lock_layout
         state['windowstate'] = windowstate.toBase64().data().decode('ascii')
         return state
+
+    def save_settings(self, settings=None):
+        if settings is None:
+            settings = Settings()
+            settings.load()
+            settings.add_recent(core.getcwd())
+        return WidgetMixin.save_settings(self, settings=settings)
 
     def apply_state(self, state):
         result = WidgetMixin.apply_state(self, state)
@@ -351,6 +378,22 @@ class TreeMixin(object):
                 item = widget.model().itemFromIndex(index)
         return item
 
+    def column_widths(self):
+        """Return the tree's column widths"""
+        widget = self.widget
+        count = widget.header().count()
+        return [widget.columnWidth(i) for i in range(count)]
+
+    def set_column_widths(self, widths):
+        """Set the tree's column widths"""
+        if widths:
+            widget = self.widget
+            count = widget.header().count()
+            if len(widths) > count:
+                widths = widths[:count]
+            for idx, value in enumerate(widths):
+                widget.setColumnWidth(idx, value)
+
 
 class DraggableTreeMixin(TreeMixin):
     """A tree widget with internal drag+drop reordering of rows
@@ -426,15 +469,25 @@ class Widget(WidgetMixin, QtWidgets.QWidget):
 class Dialog(WidgetMixin, QtWidgets.QDialog):
     Base = QtWidgets.QDialog
 
-    def __init__(self, parent=None, save_settings=False):
+    def __init__(self, parent=None):
         QtWidgets.QDialog.__init__(self, parent)
         WidgetMixin.__init__(self)
-        self._save_settings = save_settings
+
+    def accept(self):
+        self.save_settings()
+        return self.Base.accept(self)
 
     def reject(self):
-        if self._save_settings:
-            self.save_settings()
+        self.save_settings()
         return self.Base.reject(self)
+
+    def close(self):
+        """save_settings() is handled by accept() and reject()"""
+        self.Base.close(self)
+
+    def closeEvent(self, event):
+        """save_settings() is handled by accept() and reject()"""
+        self.Base.closeEvent(self, event)
 
 
 class MainWindow(MainWindowMixin, QtWidgets.QMainWindow):
@@ -443,16 +496,6 @@ class MainWindow(MainWindowMixin, QtWidgets.QMainWindow):
     def __init__(self, parent=None):
         QtWidgets.QMainWindow.__init__(self, parent)
         MainWindowMixin.__init__(self)
-
-        self.setStyleSheet("""
-            QMainWindow::separator {
-                width: %(separator)spx;
-                height: %(separator)spx;
-            }
-            QMainWindow::separator:hover {
-                background: white;
-            }
-            """ % dict(separator=defs.separator))
 
 
 class TreeView(QtWidgets.QTreeView):
@@ -481,6 +524,12 @@ class TreeView(QtWidgets.QTreeView):
     def items(self):
         return self._mixin.items()
 
+    def column_widths(self):
+        return self._mixin.column_widths()
+
+    def set_column_widths(self, widths):
+        return self._mixin.set_column_widths(widths)
+
 
 class TreeWidget(QtWidgets.QTreeWidget):
     Mixin = TreeMixin
@@ -507,6 +556,12 @@ class TreeWidget(QtWidgets.QTreeWidget):
 
     def items(self):
         return self._mixin.items()
+
+    def column_widths(self):
+        return self._mixin.column_widths()
+
+    def set_column_widths(self, widths):
+        return self._mixin.set_column_widths(widths)
 
 
 class DraggableTreeWidget(TreeWidget):

@@ -1,14 +1,16 @@
 from __future__ import division, absolute_import, unicode_literals
-
+import math
 import re
-
 from collections import defaultdict
+
+from . import compat
 
 
 _HUNK_HEADER_RE = re.compile(r'^@@ -([0-9,]+) \+([0-9,]+) @@(.*)')
 
 
 class _DiffHunk(object):
+
     def __init__(self, old_start, old_count, new_start, new_count, heading,
                  first_line_idx, lines):
         self.old_start = old_start
@@ -66,7 +68,183 @@ def _parse_diff(diff_text):
     return hunks
 
 
+def digits(number):
+    """Return the number of digits needed to display a number"""
+    if number >= 0:
+        result = int(math.log10(number)) + 1
+    else:
+        result = 1
+    return result
+
+
+class Counter(object):
+    """Keep track of a diff range's values"""
+
+    def __init__(self, value=0, max_value=-1):
+        self.value = value
+        self.max_value = max_value
+        self._initial_max_value = max_value
+
+    def reset(self):
+        """Reset the max counter and return self for convenience"""
+        self.max_value = self._initial_max_value
+        return self
+
+    def parse(self, range_str):
+        """Parse a diff range and setup internal state"""
+        start, count = _parse_range_str(range_str)
+        self.value = start
+        self.max_value = max(start + count, self.max_value)
+
+    def tick(self, amount=1):
+        """Return the current value and increment to the next"""
+        value = self.value
+        self.value += amount
+        return value
+
+
+class DiffLines(object):
+    """Parse diffs and gather line numbers"""
+
+    EMPTY = -1
+    DASH = -2
+
+    def __init__(self):
+        self.valid = True
+        self.merge = False
+
+        # diff <old> <new>
+        # merge <ours> <theirs> <new>
+        self.old = Counter()
+        self.new = Counter()
+        self.ours = Counter()
+        self.theirs = Counter()
+
+    def digits(self):
+        return digits(max(self.old.max_value, self.new.max_value,
+                          self.ours.max_value, self.theirs.max_value))
+
+    def parse(self, diff_text):
+        lines = []
+        INITIAL_STATE = 0
+        DIFF_STATE = 1
+        state = INITIAL_STATE
+        merge = self.merge = False
+        NO_NEWLINE = '\\ No newline at end of file'
+
+        old = self.old.reset()
+        new = self.new.reset()
+        ours = self.ours.reset()
+        theirs = self.theirs.reset()
+
+        for text in diff_text.splitlines():
+            if text.startswith('@@ -'):
+                parts = text.split(' ', 4)
+                if parts[0] == '@@' and parts[3] == '@@':
+                    state = DIFF_STATE
+                    old.parse(parts[1][1:])
+                    new.parse(parts[2][1:])
+                    lines.append((self.DASH, self.DASH))
+                    continue
+            if text.startswith('@@@ -'):
+                self.merge = merge = True
+                parts = text.split(' ', 5)
+                if parts[0] == '@@@' and parts[4] == '@@@':
+                    state = DIFF_STATE
+                    ours.parse(parts[1][1:])
+                    theirs.parse(parts[2][1:])
+                    new.parse(parts[3][1:])
+                    lines.append((self.DASH, self.DASH, self.DASH))
+                    continue
+            if state == INITIAL_STATE or text == NO_NEWLINE:
+                if merge:
+                    lines.append((self.EMPTY, self.EMPTY, self.EMPTY))
+                else:
+                    lines.append((self.EMPTY, self.EMPTY))
+            elif not merge and text.startswith('-'):
+                lines.append((old.tick(), self.EMPTY))
+            elif merge and text.startswith('- '):
+                lines.append((self.EMPTY, theirs.tick(), self.EMPTY))
+            elif merge and text.startswith(' -'):
+                lines.append((self.EMPTY, theirs.tick(), self.EMPTY))
+            elif merge and text.startswith('--'):
+                lines.append((ours.tick(), theirs.tick(), self.EMPTY))
+            elif not merge and text.startswith('+'):
+                lines.append((self.EMPTY, new.tick()))
+            elif merge and text.startswith('++'):
+                lines.append((self.EMPTY, self.EMPTY, new.tick()))
+            elif merge and text.startswith('+ '):
+                lines.append((self.EMPTY, theirs.tick(), new.tick()))
+            elif merge and text.startswith(' +'):
+                lines.append((ours.tick(), self.EMPTY, new.tick()))
+            elif not merge and text.startswith(' '):
+                lines.append((old.tick(), new.tick()))
+            elif merge and text.startswith('  '):
+                lines.append((ours.tick(), theirs.tick(), new.tick()))
+            elif not text:
+                new.tick()
+                old.tick()
+                ours.tick()
+                theirs.tick()
+            else:
+                state = INITIAL_STATE
+                if merge:
+                    lines.append((self.EMPTY, self.EMPTY, self.EMPTY))
+                else:
+                    lines.append((self.EMPTY, self.EMPTY))
+
+        return lines
+
+
+class FormatDigits(object):
+    """Format numbers for use in diff line numbers"""
+
+    DASH = DiffLines.DASH
+    EMPTY = DiffLines.EMPTY
+
+    def __init__(self, dash='', empty=''):
+        self.fmt = ''
+        self.empty = ''
+        self.dash = ''
+        self._dash = dash or compat.unichr(0xb7)
+        self._empty = empty or ' '
+
+    def set_digits(self, digits):
+        self.fmt = ('%%0%dd' % digits)
+        self.empty = (self._empty * digits)
+        self.dash = (self._dash * digits)
+
+    def value(self, old, new):
+        old_str = self._format(old)
+        new_str = self._format(new)
+        return ('%s %s' % (old_str, new_str))
+
+    def merge_value(self, old, base, new):
+        old_str = self._format(old)
+        base_str = self._format(base)
+        new_str = self._format(new)
+        return ('%s %s %s' % (old_str, base_str, new_str))
+
+    def number(self, value):
+        return (self.fmt % value)
+
+    def _format(self, value):
+        if value == self.DASH:
+            result = self.dash
+        elif value == self.EMPTY:
+            result = self.empty
+        else:
+            result = self.number(value)
+        return result
+
+
 class DiffParser(object):
+    """Parse and rewrite diffs to produce edited patches
+
+    This parser is used for modifying the worktree and index by constructing
+    temporary patches that are applied using "git apply".
+
+    """
 
     def __init__(self, filename, diff_text):
         self.filename = filename
@@ -160,8 +338,7 @@ class DiffParser(object):
             return '\n'.join(lines)
 
     def generate_hunk_patch(self, line_idx, reverse=False):
-        """Return a patch containing only the hunk corresponding to the
-        specified line."""
+        """Return a patch containing the hunk for the specified line only"""
         if not self.hunks:
             return None
         for hunk in self.hunks:

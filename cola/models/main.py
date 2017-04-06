@@ -66,6 +66,7 @@ class MainModel(Observable):
         # Initialize the git command object
         self.git = git.current()
 
+        self.initialized = False
         self.head = 'HEAD'
         self.diff_text = ''
         self.mode = self.mode_none
@@ -130,12 +131,17 @@ class MainModel(Observable):
         if notify:
             self.notify_observers(self.message_commit_message_changed, msg)
 
-    def save_commitmsg(self, msg):
+    def save_commitmsg(self, msg=None):
+        if msg is None:
+            msg = self.commitmsg
         path = self.git.git_path('GIT_COLA_MSG')
         try:
+            if not msg.endswith('\n'):
+                msg += '\n'
             core.write(path, msg)
         except:
             pass
+        return path
 
     def set_diff_text(self, txt):
         self.diff_text = txt
@@ -186,6 +192,7 @@ class MainModel(Observable):
     def update_status(self, update_index=False):
         # Give observers a chance to respond
         self.notify_observers(self.message_about_to_update)
+        self.initialized = True
         self._update_merge_rebase_status()
         self._update_files(update_index=update_index)
         self._update_remotes()
