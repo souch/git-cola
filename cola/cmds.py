@@ -1953,6 +1953,12 @@ def difftool_launch(left=None, right=None, paths=None,
 
     """
 
+    # use tortoise git on windows: dirty but useful
+    if utils.is_win32():
+        for path in paths:
+            os.system('"c:/Program Files/TortoiseGit/bin/TortoiseGitProc.exe" /command:diff /path:' + path)
+        return
+
     difftool_args = ['git', 'difftool', '--no-prompt']
     if staged:
         difftool_args.append('--cached')
