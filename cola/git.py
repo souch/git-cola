@@ -11,6 +11,7 @@ from os.path import join
 from . import core
 from .compat import int_types
 from .compat import ustr
+from .compat import WIN32
 from .decorators import memoize
 from .interaction import Interaction
 
@@ -67,6 +68,10 @@ def read_git_file(path):
         data = core.read(path).strip()
         if data.startswith(header):
             result = data[len(header):]
+            if result and not os.path.isabs(result):
+                path_folder = os.path.dirname(path)
+                repo_relative = os.path.join(path_folder, result)
+                result = os.path.normpath(repo_relative)
     return result
 
 

@@ -5,7 +5,7 @@ Releases
 Latest Release
 ==============
 
-:ref:`v2.10 <v2.10>` is the latest stable release.
+:ref:`v2.11 <v2.11>` is the latest stable release.
 
 Development version
 ===================
@@ -14,10 +14,59 @@ Clone the git-cola repo to get the latest development version:
 
 ``git clone git://github.com/git-cola/git-cola.git``
 
+.. _v3.0
+
+git-cola v3.0 (alpha)
+=====================
+
+Usability, bells and whistles
+-----------------------------
+* Updated Ukranian translation.
+
+Fixes
+-----
+* `git dag` now prevents nodes from overlapping in more situations.
+
+  https://github.com/git-cola/git-cola/pull/689
+
+* Adding untracked Git submodule repo directories previously ran
+  `git add submodule/` but we now call `git add submodule` without
+  the trailing slash (`/`) to avoid staging files that belong to the
+  submodule (which is possibly a `git` bug).  By working around the
+  buggy behavior we allow users to recover by issuing the appropriate
+  `git submodule add` command to properly register the submodule.
+
+  https://github.com/git-cola/git-cola/pull/681
+
+* We now avoid `git for-each-ref --sort=version:refname` on versions
+  of `git` older than `v2.7.0`.  Previously we only avoided it for
+  versions older than `v2.0.0`, which was a mistake.
+
+  https://github.com/git-cola/git-cola/pull/686
+
+* The error message displayed when `git` is not installed has been fixed.
+
+  https://github.com/git-cola/git-cola/pull/686
+
+* Adding new remotes was silently broken.
+
+  https://github.com/git-cola/git-cola/issues/684
+
+  https://github.com/git-cola/git-cola/pull/685
+
+* The repo selection dialog had errors during startup when the
+  `cola.refreshonfocus` feature was enabled, as reported on Ubuntu 16.04.
+
+  https://github.com/git-cola/git-cola/issues/690
+
+* Restored support for PyQt 4.6 (Centos 6.8)
+
+  https://github.com/git-cola/git-cola/issues/692
+
 .. _v2.11:
 
-git-cola v2.11 (beta)
-=====================
+git-cola v2.11
+==============
 
 Usability, bells and whistles
 -----------------------------
@@ -107,6 +156,12 @@ Usability, bells and whistles
 * A new `git cola recent` sub-command was added for finding recently
   edited files.
 
+* The `Fetch` dialog now allows pruning remote branches.
+
+  https://github.com/git-cola/git-cola/issues/639
+
+  https://github.com/git-cola/git-cola/pull/680
+
 Fixes
 =====
 * `git cola`'s spellchecker now supports the new `dict-common` filesystem
@@ -129,6 +184,23 @@ Fixes
   be executed with the press of a single enter key after being shown.
 
   https://github.com/git-cola/git-cola/issues/661
+
+* Committing is now allowed in when resolving a merge results in no
+  changes.  This state was previously prevented by the commit message editor,
+  which prevented users from resolving merges that result in no changes.
+
+  https://github.com/git-cola/git-cola/pull/679
+
+* The filesystem monitor would sometimes emit backtraces when directories
+  are modified.  This has been fixed.
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=1438522
+
+* Absolute paths are now returned when querying for `.git`-relative paths
+  from within a submodule, which uses `.git`-files.
+  This fixes launching `git cola` from within a subdirectory of a submodule.
+
+  https://github.com/git-cola/git-cola/pull/675
 
 .. _v2.10:
 
